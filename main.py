@@ -733,13 +733,29 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
             self.sort_mode = sort_mode
             self.page = page
             self.update_children()
-
+    
+        # helpers
+        async def _render_embed(self, user: discord.User | discord.Member, user_points: int):
+            items_sorted = sort_items(self.items_all, self.sort_mode)
+            page_items = page_slice(items_sorted, self.page)
+            total_pages = max(1, (len(items_sorted)+PAGE_SIZE-1)//PAGE_SIZE)
+            color = discord.Color.green() if user_points > 0 else discord.Color.dark_gray()
+            title = f"🛒 Boutique — Page {self.page+1}/{total_pages}"
+            desc_top = f"**Solde : {user_points} pts**\n"
+            if page_items:
+                lines = [render_card(i, it) for i, it in enumerate(page_items, start=1)]
+                body = "\n\n".join(lines)
+            else:
+                body = "_Aucun item sur cette page._"
+            embed = discord.Embed(title=title, description=desc_top + "\n" + body, color=color)
+            embed.set_footer(text="Utilise le sélecteur pour choisir un article, puis confirme.")
+            return embed
+    
         def update_children(self):
-            # (re)construire les composants dynamiques
             self.clear_items()
-
-            # Select de tri
-            self.add_item(discord.ui.Select(
+    
+            # --- Select TRI ---
+            sort_select = discord.ui.Select(
                 placeholder="Trier…",
                 min_values=1, max_values=1,
                 options=[
@@ -747,150 +763,134 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
                     discord.SelectOption(label="Prix ↓", value="price_desc", default=self.sort_mode=="price_desc"),
                     discord.SelectOption(label="Nom", value="name", default=self.sort_mode=="name"),
                     discord.SelectOption(label="Restant", value="remaining", default=self.sort_mode=="remaining"),
-                ],
-                custom_id="sort_select"
-            ))
-
-            # Sélecteur d’achat (items page)
+                ]
+            )
+    
+            async def sort_callback(interaction_inner: discord.Interaction):
+                self.sort_mode = sort_select.values[0]
+                self.page = 0
+                # recharger le solde pour l'embed
+                async with _points_lock:
+                    d = _load_points()
+                    me_pts = int(d.get(str(interaction_inner.user.id), 0))
+                self.update_children()
+                embed = await self._render_embed(interaction_inner.user, me_pts)
+                await interaction_inner.response.edit_message(embed=embed, view=self)
+    
+            sort_select.callback = sort_callback
+            self.add_item(sort_select)
+    
+            # --- Sélecteur d’achat (items page) ---
             page_items = page_slice(sort_items(self.items_all, self.sort_mode), self.page)
             options = []
             for idx, it in enumerate(page_items, start=1):
                 label = f"{idx}. {it['name']}"
-                suffix = "" if it["affordable"] and it["remaining"]!=0 else (" (limite)" if it["remaining"]==0 else " (cher)")
+                suffix = "" if it["affordable"] and it["remaining"] != 0 else (" (limite)" if it["remaining"]==0 else " (cher)")
                 options.append(discord.SelectOption(
                     label=label[:100],
                     description=f"{it['cost']} pts{suffix}"[:100],
-                    value=it["key"],
-                    default=False
+                    value=it["key"]
                 ))
-            # Discord exige ≥1 option dans un Select
             if not options:
                 options = [discord.SelectOption(label="Aucun item sur cette page", value="__none__", default=True)]
-            self.add_item(discord.ui.Select(
+    
+            buy_select = discord.ui.Select(
                 placeholder="Choisis un article à acheter…",
                 min_values=1, max_values=1,
-                options=options,
-                custom_id="buy_select"
-            ))
-
-            # Navigation
-            prev_btn = discord.ui.Button(label="◀️ Précédent", style=discord.ButtonStyle.secondary, custom_id="prev")
-            next_btn = discord.ui.Button(label="Suivant ▶️", style=discord.ButtonStyle.secondary, custom_id="next")
-            close_btn = discord.ui.Button(label="❌ Fermer", style=discord.ButtonStyle.danger, custom_id="close")
-            refresh_btn = discord.ui.Button(label="🔄 Actualiser", style=discord.ButtonStyle.secondary, custom_id="refresh")
-
-            prev_btn.disabled = self.page <= 0
+                options=options
+            )
+    
+            async def buy_callback(interaction_inner: discord.Interaction):
+                key = buy_select.values[0]
+                if key == "__none__":
+                    return await interaction_inner.response.send_message("Rien à acheter ici 🙂", ephemeral=True)
+    
+                async with _shop_lock:
+                    snapshot = _load_shop()
+                    item = snapshot.get(key)
+                if not item:
+                    return await interaction_inner.response.send_message("❌ Cet item n'existe plus.", ephemeral=True)
+    
+                cost = int(item.get("cost", 0))
+                role_id = int(item.get("role_id", 0))
+                max_per = int(item.get("max_per_user", -1))
+                already = await get_user_purchase_count(interaction_inner.user.id, key)
+                async with _points_lock:
+                    d = _load_points()
+                    me_pts = int(d.get(str(interaction_inner.user.id), 0))
+    
+                left = "∞" if max_per < 0 else f"{max(0, max_per-already)}"
+                recap = [
+                    f"**Article :** {item.get('name', key)}",
+                    f"**Prix :** {cost} pts",
+                ]
+                if role_id:
+                    recap.append(f"**Rôle :** <@&{role_id}>")
+                if item.get("description"):
+                    recap.append(f"**Description :** {item['description']}")
+                if max_per >= 0:
+                    recap.append(f"**Limite par utilisateur :** {max_per} (tu en as **{already}**, reste **{left}**)")
+                recap.append(f"**Ton solde :** {me_pts} pts → **reste après achat :** {me_pts - cost} pts")
+    
+                embed = discord.Embed(title="🧾 Confirmer l’achat", description="\n".join(recap), color=discord.Color.orange())
+                view = ConfirmBuy(user_points=me_pts, user_id=interaction_inner.user.id, key=key, item=item, already=already)
+                await interaction_inner.response.send_message(embed=embed, view=view, ephemeral=True)
+    
+            buy_select.callback = buy_callback
+            self.add_item(buy_select)
+    
+            # --- Boutons navigation ---
+            btn_prev = discord.ui.Button(label="◀️ Précédent", style=discord.ButtonStyle.secondary)
+            btn_next = discord.ui.Button(label="Suivant ▶️", style=discord.ButtonStyle.secondary)
+            btn_refresh = discord.ui.Button(label="🔄 Actualiser", style=discord.ButtonStyle.secondary)
+            btn_close = discord.ui.Button(label="❌ Fermer", style=discord.ButtonStyle.danger)
+    
             total_pages = max(1, (len(self.items_all) + PAGE_SIZE - 1)//PAGE_SIZE)
-            next_btn.disabled = (self.page >= total_pages - 1)
-
-            self.add_item(prev_btn)
-            self.add_item(next_btn)
-            self.add_item(refresh_btn)
-            self.add_item(close_btn)
-
-        async def _render_embed(self, user: discord.User | discord.Member):
-            items_sorted = sort_items(self.items_all, self.sort_mode)
-            page_items = page_slice(items_sorted, self.page)
-            total_pages = max(1, (len(items_sorted)+PAGE_SIZE-1)//PAGE_SIZE)
-
-            # header color variant
-            color = discord.Color.green() if user_points > 0 else discord.Color.dark_gray()
-            title = f"🛒 Boutique — Page {self.page+1}/{total_pages}"
-            desc_top = f"**Solde : {user_points} pts**\n"
-
-            # cartes
-            if page_items:
-                lines = [render_card(i, it) for i, it in enumerate(page_items, start=1)]
-                body = "\n\n".join(lines)
-            else:
-                body = "_Aucun item sur cette page._"
-
-            embed = discord.Embed(title=title, description=desc_top + "\n" + body, color=color)
-            embed.set_footer(text="Utilise le sélecteur pour choisir un article, puis confirme.")
-            return embed
-
-        # interactions
-
-        @discord.ui.select(custom_id="sort_select")
-        async def on_sort(self, interaction_inner: discord.Interaction, select: discord.ui.Select):
-            self.sort_mode = select.values[0]
-            self.page = 0
-            self.update_children()
-            embed = await self._render_embed(interaction.user)
-            await interaction_inner.response.edit_message(embed=embed, view=self)
-
-        @discord.ui.select(custom_id="buy_select")
-        async def on_pick(self, interaction_inner: discord.Interaction, select: discord.ui.Select):
-            key = select.values[0]
-            if key == "__none__":
-                return await interaction_inner.response.send_message("Rien à acheter ici 🙂", ephemeral=True)
-
-            # relecture fraîche de la fiche + solde + limites
-            async with _shop_lock:
-                snapshot = _load_shop()
-                item = snapshot.get(key)
-            if not item:
-                return await interaction_inner.response.send_message("❌ Cet item n'existe plus.", ephemeral=True)
-
-            cost = int(item.get("cost", 0))
-            role_id = int(item.get("role_id", 0))
-            max_per = int(item.get("max_per_user", -1))
-            already = await get_user_purchase_count(interaction_inner.user.id, key)
-            async with _points_lock:
-                d = _load_points()
-                me_pts = int(d.get(str(interaction_inner.user.id), 0))
-
-            # récap joli
-            left = "∞" if max_per < 0 else f"{max(0, max_per-already)}"
-            recap = [
-                f"**Article :** {item.get('name', key)}",
-                f"**Prix :** {cost} pts",
-            ]
-            if role_id:
-                recap.append(f"**Rôle :** <@&{role_id}>")
-            if item.get("description"):
-                recap.append(f"**Description :** {item['description']}")
-            if max_per >= 0:
-                recap.append(f"**Limite par utilisateur :** {max_per} (tu en as **{already}**, reste **{left}**)")
-            recap.append(f"**Ton solde :** {me_pts} pts → **reste après achat :** {me_pts - cost} pts")
-            embed = discord.Embed(title="🧾 Confirmer l’achat", description="\n".join(recap), color=discord.Color.orange())
-
-            # vue de confirmation (réutilisable)
-            view = ConfirmBuy(user_points=me_pts, user_id=interaction_inner.user.id,
-                              key=key, item=item, already=already)
-            await interaction_inner.response.send_message(embed=embed, view=view, ephemeral=True)
-
-        @discord.ui.button(custom_id="prev")
-        async def on_prev(self, interaction_inner: discord.Interaction, button: discord.ui.Button):
-            self.page = max(0, self.page - 1)
-            self.update_children()
-            embed = await self._render_embed(interaction.user)
-            await interaction_inner.response.edit_message(embed=embed, view=self)
-
-        @discord.ui.button(custom_id="next")
-        async def on_next(self, interaction_inner: discord.Interaction, button: discord.ui.Button):
-            total_pages = max(1, (len(self.items_all)+PAGE_SIZE-1)//PAGE_SIZE)
-            self.page = min(total_pages - 1, self.page + 1)
-            self.update_children()
-            embed = await self._render_embed(interaction.user)
-            await interaction_inner.response.edit_message(embed=embed, view=self)
-
-        @discord.ui.button(custom_id="refresh")
-        async def on_refresh(self, interaction_inner: discord.Interaction, button: discord.ui.Button):
-            # rafraîchir soldes/limites pour toutes les cartes de la page
-            async with _points_lock:
-                d = _load_points()
-                refreshed_pts = int(d.get(str(interaction_inner.user.id), 0))
-            # on ne recalcule que l'état “affordable” pour l’affichage du bar
-            nonlocal user_points
-            user_points = refreshed_pts
-            self.update_children()
-            embed = await self._render_embed(interaction.user)
-            await interaction_inner.response.edit_message(embed=embed, view=self)
-
-        @discord.ui.button(custom_id="close")
-        async def on_close(self, interaction_inner: discord.Interaction, button: discord.ui.Button):
-            await interaction_inner.response.edit_message(content="Boutique fermée.", embed=None, view=None)
+            btn_prev.disabled = self.page <= 0
+            btn_next.disabled = self.page >= (total_pages - 1)
+    
+            async def prev_callback(interaction_inner: discord.Interaction):
+                self.page = max(0, self.page - 1)
+                async with _points_lock:
+                    d = _load_points()
+                    me_pts = int(d.get(str(interaction_inner.user.id), 0))
+                self.update_children()
+                embed = await self._render_embed(interaction_inner.user, me_pts)
+                await interaction_inner.response.edit_message(embed=embed, view=self)
+    
+            async def next_callback(interaction_inner: discord.Interaction):
+                total = max(1, (len(self.items_all) + PAGE_SIZE - 1)//PAGE_SIZE)
+                self.page = min(total - 1, self.page + 1)
+                async with _points_lock:
+                    d = _load_points()
+                    me_pts = int(d.get(str(interaction_inner.user.id), 0))
+                self.update_children()
+                embed = await self._render_embed(interaction_inner.user, me_pts)
+                await interaction_inner.response.edit_message(embed=embed, view=self)
+    
+            async def refresh_callback(interaction_inner: discord.Interaction):
+                async with _points_lock:
+                    d = _load_points()
+                    me_pts = int(d.get(str(interaction_inner.user.id), 0))
+                # Recalculer "affordable" pour l'état visuel
+                for it in self.items_all:
+                    it["affordable"] = me_pts >= int(it["cost"])
+                self.update_children()
+                embed = await self._render_embed(interaction_inner.user, me_pts)
+                await interaction_inner.response.edit_message(embed=embed, view=self)
+    
+            async def close_callback(interaction_inner: discord.Interaction):
+                await interaction_inner.response.edit_message(content="Boutique fermée.", embed=None, view=None)
+    
+            btn_prev.callback = prev_callback
+            btn_next.callback = next_callback
+            btn_refresh.callback = refresh_callback
+            btn_close.callback = close_callback
+    
+            self.add_item(btn_prev)
+            self.add_item(btn_next)
+            self.add_item(btn_refresh)
+            self.add_item(btn_close)
 
     # Vue de confirmation (reprend ta logique existante)
     class ConfirmBuy(discord.ui.View):
@@ -1580,6 +1580,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
