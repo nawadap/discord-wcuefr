@@ -934,7 +934,7 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
 
     # --- ouverture initiale ---
     view = ShopBrowser(items=list(enriched), page=0, sort_mode="price_asc")
-    embed = await view._render_embed(interaction.user)
+    embed = await view._render_embed(interaction.user, user_points)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
   
 async def _try_add_role(member: discord.Member, role: discord.Role, reason: str) -> tuple[bool, str]:
@@ -1580,6 +1580,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
