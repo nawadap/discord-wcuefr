@@ -576,8 +576,51 @@ async def boutique_cmd(interaction: discord.Interaction):
         @discord.ui.select(placeholder="Choisis un objet à acheter…", min_values=1, max_values=1, options=options)
         async def select_item(self, select_interaction: discord.Interaction, select: Select):
             key = select.values[0]
-            await _handle_purchase(select_interaction, key)
-            await select_interaction.edit_original_response(view=None)
+        
+            # Relecture fraîche des données (prix, limites, solde)
+            async with _shop_lock:
+                shop_snapshot = _load_shop()
+                item = shop_snapshot.get(key)
+            if not item:
+                return await select_interaction.response.send_message("❌ Cet item n'existe plus.", ephemeral=True)
+        
+            cost = int(item.get("cost", 0))
+            role_id = int(item.get("role_id", 0))
+            max_per = int(item.get("max_per_user", -1))
+            already = await get_user_purchase_count(select_interaction.user.id, key)
+        
+            # Solde utilisateur
+            async with _points_lock:
+                points_data = _load_points()
+                user_points = int(points_data.get(str(select_interaction.user.id), 0))
+        
+            # Texte récapitulatif
+            desc_lines = []
+            desc_lines.append(f"**Article :** {item.get('name', key)}")
+            desc_lines.append(f"**Prix :** {cost} pts")
+            if role_id:
+                desc_lines.append(f"**Rôle :** <@&{role_id}>")
+            if item.get("description"):
+                desc_lines.append(f"**Description :** {item['description']}")
+            if max_per >= 0:
+                remaining = max(0, max_per - already)
+                desc_lines.append(f"**Limite par utilisateur :** {max_per} (tu en as déjà **{already}**, reste **{remaining}**)")
+        
+            desc_lines.append(f"**Ton solde :** {user_points} pts → **reste après achat :** {user_points - cost} pts")
+            recap = "\n".join(desc_lines)
+        
+            # Affiche le récap + boutons
+            embed = discord.Embed(
+                title="🧾 Confirmer l’achat",
+                description=recap,
+                color=discord.Color.orange()
+            )
+        
+            view = ConfirmBuy(user_points=user_points, user_id=select_interaction.user.id,
+                              key=key, item=item, already=already)
+        
+            # On envoie une *nouvelle* réponse (ephemeral) et on laisse le message d'origine tel quel
+            await select_interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     embed = discord.Embed(
         title="🛒 Boutique des Points",
@@ -586,6 +629,48 @@ async def boutique_cmd(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=ShopView(), ephemeral=True)
 
+    class ConfirmBuy(View):
+        def __init__(self, user_points: int, user_id: int, key: str, item: dict, already: int):
+            super().__init__(timeout=45)
+            self.user_points = user_points
+            self.user_id = user_id
+            self.key = key
+            self.item = item
+            self.already = already
+            self.cost = int(item.get("cost", 0))
+    
+        async def on_timeout(self):
+            for c in self.children:
+                c.disabled = True
+    
+        @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
+        async def confirm(self, i: discord.Interaction, _):
+            # Double check rapide côté UX (le _handle_purchase refera les vérifs serveur)
+            if self.user_points < self.cost:
+                try:
+                    await i.response.send_message("❌ Solde insuffisant au moment de la confirmation.", ephemeral=True)
+                except Exception:
+                    pass
+                return
+            await _handle_purchase(i, self.key)  # toutes les vérifs/transactions sont déjà dedans
+            # Désactive la vue après action
+            try:
+                msg = await i.original_response()
+                await msg.edit(view=None)
+            except Exception:
+                pass
+    
+        @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger)
+        async def cancel(self, i: discord.Interaction, _):
+            try:
+                await i.response.edit_message(content="Achat annulé.", view=None)
+            except Exception:
+                # fallback si edit impossible
+                try:
+                    await i.response.send_message("Achat annulé.", ephemeral=True)
+                except Exception:
+                    pass
+            
 async def _try_add_role(member: discord.Member, role: discord.Role, reason: str) -> tuple[bool, str]:
     guild = member.guild
     me = guild.me
@@ -620,7 +705,14 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
             f"❌ Tu as déjà acheté **{name}** le nombre maximum de fois autorisé ({max_per}).",
             ephemeral=True
         )
-
+        
+    if role_id:
+        role = interaction.guild.get_role(role_id)
+        if role and isinstance(interaction.user, discord.Member) and role in interaction.user.roles:
+            return await interaction.response.send_message(
+                f"❌ Tu as déjà le rôle **{role.name}**.",
+                ephemeral=True
+            )
     # Débit points
     async with _points_lock:
         data = _load_points()
@@ -1222,3 +1314,4 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
