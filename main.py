@@ -604,7 +604,7 @@ async def boutique_cmd(interaction: discord.Interaction):
                 desc_lines.append(f"**Description :** {item['description']}")
             if max_per >= 0:
                 remaining = max(0, max_per - already)
-                desc_lines.append(f"**Limite par utilisateur :** {max_per} (tu en as déjà **{already}**, reste **{remaining}**)")
+                desc_lines.append(f"**Limite par utilisateur :** {max_per} (tu en as **{already}**, reste **{remaining}**)")
         
             desc_lines.append(f"**Ton solde :** {user_points} pts → **reste après achat :** {user_points - cost} pts")
             recap = "\n".join(desc_lines)
@@ -1314,4 +1314,5 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
