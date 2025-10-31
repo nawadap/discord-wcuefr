@@ -495,7 +495,6 @@ async def addpoints_cmd(interaction: discord.Interaction, membre: discord.Member
         new_total=new_total
     )
 
-
 @tree.command(name="removepoints", description="Retirer des points à un membre (admin seulement).")
 @guilds_decorator()
 @app_commands.describe(membre="Le membre à débiter", points="Nombre de points à retirer (>=1)")
@@ -511,6 +510,19 @@ async def removepoints_cmd(interaction: discord.Interaction, membre: discord.Mem
         points=int(points),
         new_total=new_total
     )
+    
+@tree.command(name="setpoints", description="Définir le solde exact d'un membre (admin).")
+@guilds_decorator()
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(membre="Le membre", points="Nouveau solde (>=0)")
+async def setpoints_cmd(interaction: discord.Interaction, membre: discord.Member, points: app_commands.Range[int,0,1_000_000]):
+    async with _points_lock:
+        data = _load_points()
+        data[str(membre.id)] = int(points)
+        _save_points(data)
+    await interaction.response.send_message(f"🧮 Solde de **{membre.display_name}** fixé à **{int(points)}** pts.", ephemeral=True)
+    await _send_admin_log(interaction.guild, interaction.user, "setpoints",
+                          membre=f"{membre} ({membre.id})", points=int(points))
 
 @tree.command(name="classement", description="Afficher le classement des points.")
 @guilds_decorator()
@@ -524,19 +536,41 @@ async def classement_cmd(interaction: discord.Interaction, top: app_commands.Ran
     embed = discord.Embed(title=f"🏆 Classement — Top {top}", description="\n".join(lines), color=discord.Color.gold())
     await interaction.followup.send(embed=embed)
 
-@tree.command(name="lookpoints", description="Voir le nombre de points d'un membre.")
+@tree.command(name="profile", description="Affiche ton profil (points, achats, invites).")
 @guilds_decorator()
-@app_commands.describe(membre="Le membre dont tu veux voir les points")
-async def lookpoints_cmd(interaction: discord.Interaction, membre: discord.Member):
-    async with _points_lock:
-        data = _load_points()
-        points = int(data.get(str(membre.id), 0))
-    embed = discord.Embed(
-        title=f"🎯 Points de {membre.display_name}",
-        description=f"**{membre.display_name}** possède actuellement **{points}** points.",
-        color=discord.Color.blurple()
-    )
-    await interaction.response.send_message(embed=embed)
+async def profile_cmd(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    async with _points_lock: pts = int(_load_points().get(uid, 0))
+    async with _purchases_lock: pur = _load_purchases().get(uid, {})
+    invites = await _get_invite_count(interaction.user.id)
+    total_items = sum(pur.values()) if pur else 0
+
+    embed = discord.Embed(title=f"👤 Profil — {interaction.user.display_name}",
+                          color=discord.Color.blurple())
+    embed.add_field(name="Points", value=str(pts))
+    embed.add_field(name="Achats", value=str(total_items))
+    embed.add_field(name="Invitations", value=str(invites))
+    if pur:
+        preview = ", ".join(f"{k}:{v}" for k, v in list(pur.items())[:6])
+        embed.add_field(name="Détails (aperçu)", value=preview, inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@tree.command(name="topinvites", description="Classement des invitations.")
+@guilds_decorator()
+@app_commands.describe(top="Combien d'utilisateurs afficher (défaut 10)")
+async def topinvites_cmd(interaction: discord.Interaction, top: app_commands.Range[int,1,50]=10):
+    async with _invites_lock:
+        data = _load_invites().get("counts", {})
+    if not data:
+        return await interaction.response.send_message("Aucune invitation enregistrée.")
+    pairs = sorted(((int(uid), c) for uid, c in data.items()), key=lambda x: x[1], reverse=True)[:top]
+    lines = []
+    for i,(uid,count) in enumerate(pairs,1):
+        m = interaction.guild.get_member(uid) or (await bot.fetch_user(uid))  # type: ignore
+        name = m.display_name if hasattr(m,"display_name") else getattr(m,"name","Utilisateur")
+        lines.append(f"**#{i}** — {name} : **{count}**")
+    await interaction.response.send_message(embed=discord.Embed(
+        title=f"🏅 Top invites — Top {top}", description="\n".join(lines), color=discord.Color.gold()))
 
 @tree.command(name="boutique", description="Ouvre la boutique pour dépenser tes points.")
 @guilds_decorator()
@@ -1314,5 +1348,6 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
