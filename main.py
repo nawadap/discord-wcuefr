@@ -536,24 +536,98 @@ async def classement_cmd(interaction: discord.Interaction, top: app_commands.Ran
     embed = discord.Embed(title=f"🏆 Classement — Top {top}", description="\n".join(lines), color=discord.Color.gold())
     await interaction.followup.send(embed=embed)
 
-@tree.command(name="profile", description="Affiche ton profil (points, achats, invites).")
+@tree.command(name="profile", description="Affiche un profil (points, achats, invites).")
 @guilds_decorator()
-async def profile_cmd(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    async with _points_lock: pts = int(_load_points().get(uid, 0))
-    async with _purchases_lock: pur = _load_purchases().get(uid, {})
-    invites = await _get_invite_count(interaction.user.id)
-    total_items = sum(pur.values()) if pur else 0
+@app_commands.describe(membre="(Optionnel) Le membre dont afficher le profil")
+async def profile_cmd(interaction: discord.Interaction, membre: discord.Member | None = None):
+    target: discord.Member = membre or interaction.user  # type: ignore
+    uid = str(target.id)
 
-    embed = discord.Embed(title=f"👤 Profil — {interaction.user.display_name}",
-                          color=discord.Color.blurple())
-    embed.add_field(name="Points", value=str(pts))
-    embed.add_field(name="Achats", value=str(total_items))
-    embed.add_field(name="Invitations", value=str(invites))
-    if pur:
-        preview = ", ".join(f"{k}:{v}" for k, v in list(pur.items())[:6])
-        embed.add_field(name="Détails (aperçu)", value=preview, inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    # --- Chargements (avec locks) ---
+    async with _points_lock:
+        points_map = _load_points()
+        pts = int(points_map.get(uid, 0))
+
+    async with _purchases_lock:
+        purchases_map = _load_purchases()
+        user_purchases = purchases_map.get(uid, {})
+
+    invites = await _get_invite_count(target.id)
+
+    # Daily status (si tu utilises déjà DAILY_DB)
+    last_ts = 0
+    try:
+        async with _daily_lock:
+            daily = _load_daily()
+            last_ts = int(daily.get(uid, 0))
+    except Exception:
+        pass
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    daily_ready = True
+    daily_eta_txt = "✅ Disponible"
+    if last_ts:
+        elapsed = now_ts - last_ts
+        if elapsed < DAILY_COOLDOWN:
+            remain = DAILY_COOLDOWN - elapsed
+            daily_ready = False
+            daily_eta_txt = f"⏳ Dans { _format_cooldown(remain) } ( <t:{now_ts + remain}:R> )"
+
+    # --- Détails achats (jolis labels depuis shop) ---
+    async with _shop_lock:
+        shop_snapshot = _load_shop()
+
+    # Tri des achats par quantité desc., puis clé
+    top_items = sorted(user_purchases.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))[:6]
+    if top_items:
+        pretty_items = []
+        for key, qty in top_items:
+            it = shop_snapshot.get(key, {})
+            label = it.get("name", key)
+            pretty_items.append(f"• **{label}** × **{qty}**")
+        achats_preview = "\n".join(pretty_items)
+    else:
+        achats_preview = "_Aucun achat enregistré_"
+
+    total_achats = sum(int(v) for v in user_purchases.values()) if user_purchases else 0
+
+    # --- Apparence embed ---
+    # Couleur = couleur du rôle le plus haut si défini, sinon blurple
+    color = target.top_role.color if getattr(target, "top_role", None) and target.top_role.color.value else discord.Color.blurple()
+
+    embed = discord.Embed(
+        title=f"👤 Profil — {target.display_name}",
+        color=color
+    )
+
+    # Thumbnail avatar
+    embed.set_thumbnail(url=target.display_avatar.url)
+
+    # Champs principaux
+    embed.add_field(name="💰 Points", value=f"**{pts}**", inline=True)
+    embed.add_field(name="🛒 Achats", value=f"**{total_achats}**", inline=True)
+    embed.add_field(name="📨 Invitations", value=f"**{invites}**", inline=True)
+
+    # Daily
+    embed.add_field(name="🗓️ Daily", value=daily_eta_txt, inline=True)
+
+    # Dates (création compte & join serveur)
+    if target.created_at:
+        created_ts = int(target.created_at.replace(tzinfo=timezone.utc).timestamp())
+        embed.add_field(name="🆔 Compte créé", value=f"<t:{created_ts}:D> (<t:{created_ts}:R>)", inline=True)
+    if target.joined_at:
+        joined_ts = int(target.joined_at.replace(tzinfo=timezone.utc).timestamp())
+        embed.add_field(name="🚪 Arrivée serveur", value=f"<t:{joined_ts}:D> (<t:{joined_ts}:R>)", inline=True)
+
+    # Achats (aperçu)
+    embed.add_field(name="🧾 Détails achats (aperçu)", value=achats_preview, inline=False)
+
+    # Footer
+    embed.set_footer(text=f"ID: {target.id}")
+
+    # Si on regarde son propre profil → message privé (ephemeral). Pour un autre → public.
+    is_self = (target.id == interaction.user.id)
+    await interaction.response.send_message(embed=embed, ephemeral=is_self)
 
 @tree.command(name="topinvites", description="Classement des invitations.")
 @guilds_decorator()
@@ -1348,6 +1422,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
