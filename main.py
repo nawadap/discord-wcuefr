@@ -1,12 +1,7 @@
 # --- BOT POINTS + BOUTIQUE (SANS VOCAUX) ---
 
-import asyncio
-import json
-import logging
-import os
-import tempfile
+import asyncio, json, logging, os, tempfile
 from typing import Dict, Tuple, List
-
 import discord
 from discord import Intents, app_commands
 from discord.ext import commands
@@ -14,13 +9,12 @@ from discord.ui import View, Select
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
-if not logging.getLogger().handlers:  # évite de reconfigurer si le module est importé ailleurs
+if not logging.getLogger().handlers: 
     logging.basicConfig(
-        level=logging.INFO,  # ou DEBUG si tu veux plus de détails
+        level=logging.INFO,  
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    # Optionnel: rendre les logs discord.py moins verbeux
     logging.getLogger("discord").setLevel(logging.WARNING)
     logging.getLogger("discord.app_commands").setLevel(logging.WARNING)
     
@@ -74,8 +68,8 @@ _voice_sessions: dict[tuple[int, int], int] = {}
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
-intents.message_content = True    # <— nécessaire pour compter les messages
-intents.voice_states = True       # <— nécessaire pour suivre le vocal
+intents.message_content = True   
+intents.voice_states = True  
 
 bot = commands.Bot(
     command_prefix=commands.when_mentioned, 
@@ -647,12 +641,20 @@ async def quests_cmd(interaction: discord.Interaction):
     week_key = _week_str()
     qcfg     = _load_quests()
 
+    # --- BONUS PALIER utilisateur
+    user_mul = 1.0
+    tier_key = tier_label = None
+    if isinstance(interaction.user, discord.Member):
+        user_mul = points_multiplier_for(interaction.user)
+        tier_key, tier_label, _ = tier_info(interaction.user)
+
     async with _quests_progress_lock:
         pdb = _load_quests_progress()
         daily_map  = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, interaction.user.id)  # type: ignore
         weekly_map = _get_user_all_quests(pdb, "weekly", week_key, interaction.guild.id, interaction.user.id)  # type: ignore
 
-    def _render_section(title: str, qcat: dict, u_map: dict) -> str:
+    # --- Rendu sections (ajout de user_mul)
+    def _render_section(title: str, qcat: dict, u_map: dict, mul: float) -> str:
         if not qcat:
             return f"__{title}__\n_Aucune quête._"
         lines = [f"__{title}__"]
@@ -665,22 +667,37 @@ async def quests_cmd(interaction: discord.Interaction):
             claimed = int(slot.get("claimed", 0))
             maxc    = int(q.get("max_claims_per_reset", 1))
             done    = prog >= target
+
+            # Barre de progression
             bar_w   = 12
             filled  = max(0, min(bar_w, int(round((prog/target)*bar_w))) if target>0 else bar_w)
             bar     = "▰"*filled + "▱"*(bar_w-filled)
+
+            # Texte statut
             status  = "✅ **Prête à réclamer**" if (done and claimed < maxc) else ("🟡 En cours" if not done else "💠 Déjà réclamée")
+
+            # --- Affichage bonus estimé (arrondi à l'unité, comme au claim)
+            reward_txt = f"**+{reward}** pts"
+            if user_mul > 1.0:
+                est = int(round(reward * user_mul))
+                reward_txt += f" *(≈ **+{est}** avec bonus)*"
+
             lines.append(
-                f"**{name}** — **+{reward}** pts\n"
+                f"**{name}** — {reward_txt}\n"
                 f"`{bar}` {min(prog,target)}/{target} • {status}"
             )
         return "\n".join(lines)
 
+    # Compose l'embed (et note sur le bonus)
     def _make_embed(d_map, w_map) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map) + "\n\n" +
-            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map)
+            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map, user_mul) + "\n\n" +
+            _render_section(f"Hedbdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, user_mul)
         )
-        embed = discord.Embed(title="🗺️ Quêtes", description=desc, color=discord.Color.blurple())
+        note = ""
+        if user_mul > 1.0 and tier_label:
+            note = f"\n\n*Bonus palier actif : {tier_label} ×{user_mul:.2g} — appliqué **sur la somme totale** au moment de la réclamation.*"
+        embed = discord.Embed(title="🗺️ Quêtes", description=desc + note, color=discord.Color.blurple())
         embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
         return embed
 
@@ -2544,6 +2561,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
