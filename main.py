@@ -384,6 +384,24 @@ async def _send_invite_log(guild: discord.Guild, text: str):
         except Exception:
             pass
 # ---------- Helper ----------
+def tier_info(member: discord.Member) -> tuple[str | None, str | None, list[str]]:
+    """
+    Retourne (tier_key, tier_label, perks_list)
+    - tier_key ∈ {"bronze","argent","or"} ou None
+    - tier_label = texte + emoji
+    - perks_list = liste des avantages à afficher dans /profile
+    """
+    rid = member_tier_role(member)
+    if not rid:
+        return None, None, []
+    if rid == OR:
+        return "or", "🥇 **Or**", ["Rôle exclusif", "Couleur du pseudo", "Badge dans /profile", "Hall of Fame (aura dorée)"]
+    if rid == ARGENT:
+        return "argent", "🥈 **Argent**", ["Rôle exclusif", "Couleur du pseudo", "Badge dans /profile"]
+    if rid == BRONZE:
+        return "bronze", "🥉 **Bronze**", ["Rôle exclusif", "Couleur du pseudo", "Badge dans /profile"]
+    return None, None, []
+
 def member_tier_role(member: discord.Member) -> int | None:
     ids = {r.id for r in member.roles}
     for rid in (OR, ARGENT, BRONZE):
@@ -1159,7 +1177,7 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     target: discord.Member = membre or interaction.user  # type: ignore
     uid = str(target.id)
 
-    # --- Chargements (avec locks) ---
+    # --- Données ---
     async with _points_lock:
         points_map = _load_points()
         pts = int(points_map.get(uid, 0))
@@ -1170,7 +1188,7 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
 
     invites = await _get_invite_count(target.id)
 
-    # Daily status (si tu utilises déjà DAILY_DB)
+    # Daily (streak + cooldown)
     last_ts = 0
     streak = 0
     try:
@@ -1183,19 +1201,17 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
         pass
 
     now_ts = int(datetime.now(timezone.utc).timestamp())
-    daily_ready = True
     daily_eta_txt = "✅ Disponible"
     if last_ts:
         elapsed = now_ts - last_ts
         if elapsed < DAILY_COOLDOWN:
             remain = DAILY_COOLDOWN - elapsed
             daily_eta_txt = f"⏳ Dans { _format_cooldown(remain) } ( <t:{now_ts + remain}:R> )"
-            
-    # --- Détails achats (jolis labels depuis shop) ---
+
+    # Achats (aperçu)
     async with _shop_lock:
         shop_snapshot = _load_shop()
 
-    # Tri des achats par quantité desc., puis clé
     top_items = sorted(user_purchases.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))[:6]
     if top_items:
         pretty_items = []
@@ -1206,19 +1222,24 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
         achats_preview = "\n".join(pretty_items)
     else:
         achats_preview = "_Aucun achat enregistré_"
-
     total_achats = sum(int(v) for v in user_purchases.values()) if user_purchases else 0
 
-    # --- Apparence embed ---
-    # Couleur = couleur du rôle le plus haut si défini, sinon blurple
-    color = target.top_role.color if getattr(target, "top_role", None) and target.top_role.color.value else discord.Color.blurple()
+    # --- Palier & aura ---
+    tier_key, tier_label, tier_perks = tier_info(target)
 
-    embed = discord.Embed(
-        title=f"👤 Profil — {target.display_name}",
-        color=color
-    )
+    # Couleur de l'embed : OR = doré (aura), sinon couleur du rôle le plus haut si dispo, sinon blurple
+    if tier_key == "or":
+        color = discord.Color.gold()
+    else:
+        color = target.top_role.color if getattr(target, "top_role", None) and target.top_role.color.value else discord.Color.blurple()
 
-    # Thumbnail avatar
+    # Titre (+ ✨ pour aura Or)
+    title = f"👤 Profil — {target.display_name}"
+    if tier_key == "or":
+        title = f"👤 ✨ Profil — {target.display_name} ✨"
+
+    # --- Embed ---
+    embed = discord.Embed(title=title, color=color)
     embed.set_thumbnail(url=target.display_avatar.url)
 
     # Champs principaux
@@ -1226,19 +1247,17 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     embed.add_field(name="🛒 Achats", value=f"**{total_achats}**", inline=True)
     embed.add_field(name="📨 Invitations", value=f"**{invites}**", inline=True)
 
-    # Daily
-    # après avoir calculé elapsed
+    # Daily + streak (0 si grace window dépassée)
     streak_preview = streak
     if last_ts and (now_ts - last_ts) > STREAK_GRACE:
         streak_preview = 0
-
     embed.add_field(
         name="🗓️ Daily",
         value=f"{daily_eta_txt}\nStreak: **{streak_preview}/{STREAK_MAX}**",
         inline=True
     )
 
-    # Dates (création compte & join serveur)
+    # Dates
     if target.created_at:
         created_ts = int(target.created_at.replace(tzinfo=timezone.utc).timestamp())
         embed.add_field(name="🆔 Compte créé", value=f"<t:{created_ts}:D> (<t:{created_ts}:R>)", inline=True)
@@ -1249,10 +1268,25 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     # Achats (aperçu)
     embed.add_field(name="🧾 Détails achats (aperçu)", value=achats_preview, inline=False)
 
+    # Palier + avantages + Hall of Fame
+    if tier_label:
+        embed.add_field(name="🎖️ Palier", value=tier_label, inline=True)
+
+    if tier_perks:
+        perks_txt = "• " + "\n• ".join(tier_perks)
+        embed.add_field(name="✨ Avantages", value=perks_txt, inline=False)
+
+    if tier_key == "or":
+        embed.add_field(
+            name="🏛️ Hall of Fame",
+            value="Membre du Hall of Fame — **aura dorée** activée sur ce profil.",
+            inline=False
+        )
+
     # Footer
     embed.set_footer(text=f"ID: {target.id}")
 
-    # Si on regarde son propre profil → message privé (ephemeral). Pour un autre → public.
+    # Ephemeral si on regarde son propre profil
     is_self = (target.id == interaction.user.id)
     await interaction.response.send_message(embed=embed, ephemeral=is_self)
 
@@ -2516,6 +2550,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
