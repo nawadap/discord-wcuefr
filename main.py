@@ -2157,7 +2157,6 @@ async def on_member_remove(member: discord.Member):
 
 @bot.event
 async def on_message(message: discord.Message):
-    """Détecte les messages privés envoyés au bot."""
     # On ignore les messages du bot lui-même
     if message.author.bot:
         return
@@ -2165,8 +2164,6 @@ async def on_message(message: discord.Message):
     # Si le message vient d’un DM (pas d’un serveur)
     if isinstance(message.channel, discord.DMChannel):
         user = message.author
-
-        # 🔧 Envoie une copie dans un salon staff défini dans .env
         if ADMIN_LOG_CHANNEL_ID:
             channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
             if channel is None:
@@ -2174,7 +2171,6 @@ async def on_message(message: discord.Message):
                     channel = await bot.fetch_channel(ADMIN_LOG_CHANNEL_ID)
                 except Exception:
                     channel = None
-
             if channel:
                 embed = discord.Embed(
                     title="💬 Nouveau message privé reçu",
@@ -2186,30 +2182,26 @@ async def on_message(message: discord.Message):
                 if message.attachments:
                     urls = "\n".join(a.url for a in message.attachments)
                     embed.add_field(name="Pièces jointes", value=urls, inline=False)
-
                 try:
                     await channel.send(embed=embed)
                 except Exception:
                     pass
-
-        # Tu peux aussi stocker dans un JSON local si tu veux garder une trace historique
+        # on ne compte pas les DMs pour les quêtes
         return
 
-    # 👇 N’oublie pas : pour que les autres commandes slash fonctionnent,
-    # tu dois propager le message à la commande handler si c’est dans un salon
-        # --- Quêtes: compter les messages en serveur ---
-    if message.guild and not message.author.bot:
+    # --- Quêtes: compter les messages en serveur ---
+    if message.guild:
         date_str = _today_str()
         async with _quests_progress_lock:
             pdb = _load_quests_progress()
-            # incrémenter la quête "messages" si existe
-            # on ne sait pas le nom exact ici, donc on parcourt le catalogue "daily"
             qcat = _load_quests().get("daily", {})
             for qkey, q in qcat.items():
                 if q.get("type") == "messages":
                     slot = _ensure_user_quest_slot(pdb, date_str, message.guild.id, message.author.id, qkey)
                     slot["progress"] = int(slot.get("progress", 0)) + 1
             _save_quests_progress(pdb)
+
+    # Propager aux autres commandes
     await bot.process_commands(message)
 
 async def quests_midnight_rollover():
@@ -2310,6 +2302,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
