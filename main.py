@@ -933,8 +933,8 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
             self.cost = int(item.get("cost", 0))
 
         async def on_timeout(self):
-            for c in self.children:
-                c.disabled = True
+            # Appelle l’implémentation parent pour GRISER + EDIT le message
+            await super().on_timeout()
 
         @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
         async def confirm(self, i: discord.Interaction, _):
@@ -1614,6 +1614,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
