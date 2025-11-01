@@ -557,8 +557,9 @@ async def ping_cmd(interaction: discord.Interaction):
 
 @tree.command(name="addpoints", description="Ajouter des points à un membre (admin seulement).")
 @guilds_decorator()
-@app_commands.describe(membre="Le membre à créditer", points="Nombre de points à ajouter (>=1)")
+@app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(membre="Le membre à créditer", points="Nombre de points à ajouter (>=1)")
 async def addpoints_cmd(interaction: discord.Interaction, membre: discord.Member, points: app_commands.Range[int, 1, 1_000_000]):
     new_total = await add_points(membre.id, int(points))
     await interaction.response.send_message(f"✅ **{membre.display_name}** a maintenant **{new_total}** points (+{int(points)}).")
@@ -1851,6 +1852,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
