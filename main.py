@@ -456,13 +456,11 @@ class OwnedView(discord.ui.View):
 # ---------- Slash commands ----------
 
 # --- Streak (récompenses et tolérance) ---
-#DAILY_COOLDOWN = 24 * 60 * 60  # 24h
-DAILY_COOLDOWN = 3*60  # 24h
+DAILY_COOLDOWN = 24 * 60 * 60  # 24h
 STREAK_MAX = 4
 STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
-# STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
-STREAK_WARNING_BEFORE = 2*60
+STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
 
 @tree.command(name="daily", description="Réclame ta récompense quotidienne (avec streak).")
@@ -1725,6 +1723,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
