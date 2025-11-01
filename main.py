@@ -455,7 +455,8 @@ class OwnedView(discord.ui.View):
 
 # ---------- Slash commands ----------
 
-DAILY_COOLDOWN = 24*60*60  # 24h en secondes
+# DAILY_COOLDOWN = 24*60*60  # 24h en secondes
+DAILY_COOLDOWN = 10
 STREAK_MAX = 4
 STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
 
@@ -1664,6 +1665,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
