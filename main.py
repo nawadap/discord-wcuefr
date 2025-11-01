@@ -455,10 +455,15 @@ class OwnedView(discord.ui.View):
 
 # ---------- Slash commands ----------
 
-# DAILY_COOLDOWN = 24*60*60  # 24h en secondes
-DAILY_COOLDOWN = 10
+# --- Streak (récompenses et tolérance) ---
+#DAILY_COOLDOWN = 24 * 60 * 60  # 24h
+DAILY_COOLDOWN = 20  # 24h
 STREAK_MAX = 4
 STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
+STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
+# STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
+STREAK_WARNING_BEFORE = 10
+
 
 @tree.command(name="daily", description="Réclame ta récompense quotidienne (avec streak).")
 @guilds_decorator()
@@ -1656,6 +1661,54 @@ async def on_member_remove(member: discord.Member):
         text = f"👋 {member.mention} a quitté le serveur, invité·e par {inviter_mention} et a maintenant **{new_total}** invitation(s)."
         await _send_invite_log(guild, text)
 
+@bot.loop.create_task
+async def streak_monitor():
+    """Vérifie régulièrement les streaks daily et prévient les utilisateurs."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            async with _daily_lock:
+                daily = _load_daily()
+
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            updated = False
+
+            for uid, state in list(daily.items()):
+                last = int(state.get("last", 0))
+                streak = int(state.get("streak", 0))
+                if not last or streak == 0:
+                    continue
+
+                elapsed = now_ts - last
+                user = bot.get_user(int(uid))
+                if not user:
+                    continue
+
+                # ⚠️ Avertissement 30 min avant expiration
+                if STREAK_GRACE - STREAK_WARNING_BEFORE <= elapsed < STREAK_GRACE:
+                    try:
+                        await user.send("⚠️ **Votre daily streak expire bientôt !** Pense à le réclamer avant 30 minutes ⏰")
+                    except Exception:
+                        pass
+
+                # 💀 Expiration
+                elif elapsed >= STREAK_GRACE:
+                    daily[uid] = {"last": last, "streak": 0}
+                    updated = True
+                    try:
+                        await user.send("💀 **Votre daily streak a expiré !** Tu repars à 0 😿")
+                    except Exception:
+                        pass
+
+            if updated:
+                async with _daily_lock:
+                    _save_daily(daily)
+
+        except Exception as e:
+            logging.exception("Erreur dans streak_monitor: %s", e)
+
+        await asyncio.sleep(60)  # vérifie toutes les 60 secondes
+
 # ---------- Run ----------
 if __name__ == "__main__":
     # Crée les fichiers si absents
@@ -1665,6 +1718,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
