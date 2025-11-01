@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
 from typing import Dict, Tuple, List
 
 import discord
@@ -147,8 +148,7 @@ def _load_points() -> Dict[str, int]:
     return {str(k): int(v) for k, v in data.items()}
 
 def _save_points(points: Dict[str, int]) -> None:
-    with open(POINTS_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(points, f, ensure_ascii=False, indent=2)
+    _atomic_write(POINTS_DB_PATH, points)
 
 async def add_points(user_id: int, amount: int) -> int:
     async with _points_lock:
@@ -233,8 +233,7 @@ def _load_shop() -> Dict[str, dict]:
     return shop
 
 def _save_shop(shop: Dict[str, dict]) -> None:
-    with open(SHOP_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(shop, f, ensure_ascii=False, indent=2)
+    _atomic_write(SHOP_DB_PATH, shop)
 
 # ---------- Achats par utilisateur (JSON) ----------
 def _ensure_purchases_exists():
@@ -250,8 +249,7 @@ def _load_purchases() -> Dict[str, Dict[str, int]]:
     return {str(uid): {str(k): int(v) for k, v in items.items()} for uid, items in data.items()}
 
 def _save_purchases(p: Dict[str, Dict[str, int]]) -> None:
-    with open(PURCHASES_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(p, f, ensure_ascii=False, indent=2)
+    _atomic_write(PURCHASES_DB_PATH, p)
 
 async def get_user_purchase_count(user_id: int, key: str) -> int:
     async with _purchases_lock:
@@ -282,8 +280,8 @@ def _load_invites() -> Dict[str, Dict[str, int]]:
     return data
 
 def _save_invites(data: Dict[str, Dict[str, int]]) -> None:
-    with open(INVITES_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_write(INVITES_DB_PATH, data)
+
 
 async def _add_invite_for(inviter_id: int, member_id: int) -> int:
     async with _invites_lock:
@@ -362,6 +360,19 @@ async def _send_invite_log(guild: discord.Guild, text: str):
         except Exception:
             pass
 # ---------- Helper ----------
+
+def _atomic_write(path: str, data: dict):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".tmp_", text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush(); os.fsync(f.fileno())
+        os.replace(tmp, path)  # atomic
+    finally:
+        try: os.remove(tmp)
+        except FileNotFoundError: pass
+            
 def _ensure_daily_exists():
     if not os.path.exists(DAILY_DB_PATH):
         with open(DAILY_DB_PATH, "w", encoding="utf-8") as f:
@@ -382,8 +393,7 @@ def _load_invite_rewards() -> Dict[str, Dict[str, int]]:
     return {"rewarded": rewarded}
 
 def _save_invite_rewards(data: Dict[str, Dict[str, int]]) -> None:
-    with open(INVITE_REWARDS_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_write(INVITE_REWARDS_DB_PATH, data)
 
 def _load_daily() -> Dict[str, int]:
     """{ user_id(str): last_claim_ts(int, secondes UTC) }"""
@@ -394,8 +404,7 @@ def _load_daily() -> Dict[str, int]:
     return {str(k): int(v) for k, v in data.items()}
 
 def _save_daily(data: Dict[str, int]) -> None:
-    with open(DAILY_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_write(DAILY_DB_PATH, data)
 
 def _format_cooldown(secs: float) -> str:
     s = int(round(secs))
@@ -1614,6 +1623,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
