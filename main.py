@@ -50,6 +50,14 @@ INVITE_LOG_CHANNEL_ID = int(os.getenv("INVITE_LOG_CHANNEL_ID", "0"))
 
 # --- Paramètres ---
 INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "20"))
+BRONZE = int(os.getenv("BRONZE_ROLE_ID", "0"))
+ARGENT = int(os.getenv("ARGENT_ROLE_ID", "0"))
+OR     = int(os.getenv("OR_ROLE_ID", "0"))
+
+POINTS_MULTIPLIERS = {BRONZE: 1.10, ARGENT: 1.25, OR: 1.50}
+DAILY_FLAT_BONUS   = {BRONZE: 1, ARGENT: 2, OR: 4}
+SHOP_DISCOUNT      = {BRONZE: 0.05, ARGENT: 0.10, OR: 0.15}
+POINTS_BONUS_CAP   = 1.50  # sécurité : max +50%
 
 # --- Verrous (internes, pas dans .env) ---
 _points_lock = asyncio.Lock()
@@ -376,6 +384,26 @@ async def _send_invite_log(guild: discord.Guild, text: str):
         except Exception:
             pass
 # ---------- Helper ----------
+def member_tier_role(member: discord.Member) -> int | None:
+    ids = {r.id for r in member.roles}
+    for rid in (OR, ARGENT, BRONZE):
+        if rid and rid in ids:
+            return rid
+    return None
+
+def points_multiplier_for(member: discord.Member) -> float:
+    rid = member_tier_role(member)
+    mul = POINTS_MULTIPLIERS.get(rid, 1.0)
+    return min(mul, POINTS_BONUS_CAP)
+
+def daily_flat_bonus_for(member: discord.Member) -> int:
+    rid = member_tier_role(member)
+    return int(DAILY_FLAT_BONUS.get(rid, 0))
+
+def shop_discount_for(member: discord.Member) -> float:
+    rid = member_tier_role(member)
+    return float(SHOP_DISCOUNT.get(rid, 0.0))
+
 # ---------- Quêtes : JSON + helpers ----------
 def _ensure_quests_exists():
     """Crée un petit catalogue de quêtes si absent."""
@@ -676,7 +704,8 @@ async def quests_cmd(interaction: discord.Interaction):
 
                     _save_quests_progress(pdb)
 
-                if gained > 0:
+                if gained > 0 and isinstance(i.user, discord.Member):
+                    gained = int(round(gained * points_multiplier_for(i.user)))
                     new_total = await add_points(i.user.id, gained)
                     # refresh visuel
                     async with _quests_progress_lock:
@@ -745,6 +774,8 @@ async def daily_cmd(interaction: discord.Interaction):
                 new_streak = 1  # jour manqué -> reset
 
         reward = STREAK_REWARDS.get(new_streak, STREAK_REWARDS[STREAK_MAX])
+        reward += daily_flat_bonus_for(interaction.user)  # +1/+2/+4 selon palier
+        reward = max(0, reward)
 
         # Créditer & enregistrer
         new_total = await add_points(interaction.user.id, reward)
@@ -1253,7 +1284,10 @@ async def boutique_cmd(interaction: discord.Interaction):
         user_points = int(points_data.get(str(interaction.user.id), 0))
     async with _shop_lock:
         shop = _load_shop()
-
+        
+    user_discount = 0.0
+    if isinstance(interaction.user, discord.Member):
+        user_discount = shop_discount_for(interaction.user)
     # rien en boutique
     if not shop:
         return await interaction.response.send_message("La boutique est vide pour le moment.", ephemeral=True)
@@ -1261,11 +1295,16 @@ async def boutique_cmd(interaction: discord.Interaction):
     # enrichissement items (reste/limite/achetable)
     enriched = []
     for key, it in shop.items():
-        max_per = int(it.get("max_per_user", -1))
-        already = await get_user_purchase_count(interaction.user.id, key)
+        max_per   = int(it.get("max_per_user", -1))
+        already   = await get_user_purchase_count(interaction.user.id, key)
         remaining = (max_per - already) if max_per >= 0 else -1
-        affordable = user_points >= int(it.get("cost", 0))
-        role_id = int(it.get("role_id", 0))
+    
+        base_cost = int(it.get("cost", 0))
+        final_cost = max(1, int(round(base_cost * (1.0 - user_discount))))  # <<< remise appliquée
+    
+        affordable = user_points >= final_cost                                 # <<< test avec prix remisé
+        role_id    = int(it.get("role_id", 0))
+    
         badges = []
         if role_id:
             badges.append("🎖 rôle")
@@ -1273,17 +1312,21 @@ async def boutique_cmd(interaction: discord.Interaction):
             badges.append(f"🔢 {max_per} max")
         if remaining == 0:
             badges.append("⛔ limite atteinte")
+        if user_discount > 0:
+            badges.append(f"💸 -{int(user_discount*100)}%")                    # <<< badge remise
+    
         enriched.append({
             "key": key,
             "name": it.get("name", key),
-            "cost": int(it.get("cost", 0)),
+            "cost": final_cost,                                               # <<< on stocke le prix remisé
             "description": (it.get("description") or "").strip(),
             "role_id": role_id,
             "max_per": max_per,
             "already": already,
             "remaining": remaining,
             "affordable": affordable,
-            "badges": " • ".join(badges) if badges else "—"
+            "badges": " • ".join(badges) if badges else "—",
+            "base_cost": base_cost,                                           # (optionnel) pour affichage comparatif
         })
 
     # tri par défaut: coût croissant
@@ -1309,12 +1352,22 @@ async def boutique_cmd(interaction: discord.Interaction):
         status = "🟢 Achetable" if can_buy else ("🟡 Solde insuffisant" if not it["affordable"] else "🔴 Limite atteinte")
         role_txt = f" | rôle: <@&{it['role_id']}>" if it["role_id"] else ""
         desc = it["description"] or "_Aucune description_"
+        old = ""
+        if "base_cost" in it and it["base_cost"] > it["cost"]:
+            old = f" ~~{it['base_cost']}~~"  # prix barré
+        
+        cost_line = f"— **{it['cost']}** pts{old}"
+        
+        role_txt = f" | rôle: <@&{it['role_id']}>" if it["role_id"] else ""
+        desc = it["description"] or "_Aucune description_"
+        
         return (
-f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
-{desc}
-`{bar}`  •  {status}  •  limite: **{lim_txt}**
-*{it['badges']}*"""
+        f"""**{i}. {it['name']}** {cost_line}{role_txt}
+        {desc}
+        `{bar}`  •  {status}  •  limite: **{lim_txt}**
+        *{it['badges']}*"""
         )
+
 
     def page_slice(items, page: int):
         start = page * PAGE_SIZE
@@ -1336,7 +1389,13 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
             total_pages = max(1, (len(items_sorted)+PAGE_SIZE-1)//PAGE_SIZE)
             color = discord.Color.green() if user_points > 0 else discord.Color.dark_gray()
             title = f"🛒 Boutique — Page {self.page+1}/{total_pages}"
-            desc_top = f"**Solde : {user_points} pts**\n"
+            remise_txt = ""
+            if isinstance(user, discord.Member):
+                d = shop_discount_for(user)
+                if d > 0:
+                    remise_txt = f" • Remise: **-{int(d*100)}%**"
+            desc_top = f"**Solde : {user_points} pts**{remise_txt}\n"
+
             if page_items:
                 lines = [render_card(i, it, user_points) for i, it in enumerate(page_items, start=1)]
                 body = "\n\n".join(lines)
@@ -1413,11 +1472,16 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
                 async with _points_lock:
                     d = _load_points()
                     me_pts = int(d.get(str(interaction_inner.user.id), 0))
+                    
+                disc = 0.0
+                if isinstance(interaction_inner.user, discord.Member):
+                    disc = shop_discount_for(interaction_inner.user)
+                final_cost = max(1, int(round(cost * (1.0 - disc))))
     
                 left = "∞" if max_per < 0 else f"{max(0, max_per-already)}"
                 recap = [
                     f"**Article :** {item.get('name', key)}",
-                    f"**Prix :** {cost} pts",
+                    f"**Prix :** {final_cost} pts" + (f"  *(remise {int(disc*100)}% — {cost} → {final_cost})*" if disc > 0 else ""),
                 ]
                 if role_id:
                     recap.append(f"**Rôle :** <@&{role_id}>")
@@ -1425,8 +1489,8 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
                     recap.append(f"**Description :** {item['description']}")
                 if max_per >= 0:
                     recap.append(f"**Limite par utilisateur :** {max_per} (tu en as **{already}**, reste **{left}**)")
-                recap.append(f"**Ton solde :** {me_pts} pts → **reste après achat :** {me_pts - cost} pts")
-    
+                recap.append(f"**Ton solde :** {me_pts} pts → **reste après achat :** {me_pts - final_cost} pts")
+                
                 embed = discord.Embed(title="🧾 Confirmer l’achat", description="\n".join(recap), color=discord.Color.orange())
                 view = ConfirmBuy(user_points=me_pts, user_id=interaction_inner.user.id, key=key, item=item, already=already)
                 await interaction_inner.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -1564,18 +1628,19 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
     if not item:
         return await interaction.response.send_message("❌ Cet item n'existe plus.", ephemeral=True)
 
-    cost = int(item["cost"])
+    base_cost = int(item["cost"])
     name = item["name"]
     role_id = int(item.get("role_id", 0))
     max_per = int(item.get("max_per_user", -1))
-    already = await get_user_purchase_count(interaction.user.id, key)  # <-- await + bon nom
-
+    already = await get_user_purchase_count(interaction.user.id, key)
+    
     if max_per >= 0 and already >= max_per:
         return await interaction.response.send_message(
             f"❌ Tu as déjà acheté **{name}** le nombre maximum de fois autorisé ({max_per}).",
             ephemeral=True
         )
-        
+    
+    # Refus si l'utilisateur a déjà le rôle (si item de rôle)
     if role_id:
         role = interaction.guild.get_role(role_id)
         if role and isinstance(interaction.user, discord.Member) and role in interaction.user.roles:
@@ -1583,7 +1648,14 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
                 f"❌ Tu as déjà le rôle **{role.name}**.",
                 ephemeral=True
             )
-    # Débit points
+    
+    # >>> CALCUL REMISE CÔTÉ SERVEUR (SÉCURITÉ)
+    disc = 0.0
+    if isinstance(interaction.user, discord.Member):
+        disc = shop_discount_for(interaction.user)
+    cost = max(1, int(round(base_cost * (1.0 - disc))))
+    
+    # Débit points (avec le coût remisé)
     async with _points_lock:
         data = _load_points()
         user_points = int(data.get(str(interaction.user.id), 0))
@@ -2244,7 +2316,9 @@ async def on_member_join(member: discord.Member):
 
                 if mid not in rewarded:
                     # Première fois que ce membre rejoint et crédite un parrain → on récompense
-                    new_total_pts = await add_points(inviter_id, INVITE_REWARD_POINTS)
+                    inviter = guild.get_member(inviter_id)
+                    mul = points_multiplier_for(inviter) if inviter else 1.0
+                    new_total_pts = await add_points(inviter_id, int(round(INVITE_REWARD_POINTS * mul)))
                     rewarded[mid] = int(inviter_id)
                     _save_invite_rewards(rdb)
 
@@ -2437,6 +2511,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
