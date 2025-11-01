@@ -14,9 +14,18 @@ from discord.ui import View, Select
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
+if not logging.getLogger().handlers:  # évite de reconfigurer si le module est importé ailleurs
+    logging.basicConfig(
+        level=logging.INFO,  # ou DEBUG si tu veux plus de détails
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    # Optionnel: rendre les logs discord.py moins verbeux
+    logging.getLogger("discord").setLevel(logging.WARNING)
+    logging.getLogger("discord.app_commands").setLevel(logging.WARNING)
+    
 # ---------- Chargement config ----------
 load_dotenv()
-
 # --- Token et guilde ---
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -1601,8 +1610,6 @@ async def setup_hook():
 
 @bot.event
 async def on_ready():
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger("discord.app_commands").setLevel(logging.WARNING)
     logging.info("Connecté en tant que %s (%s)", bot.user, bot.user.id)  # type: ignore
     # Précharger le cache d’invites pour toutes les guildes
     for g in bot.guilds:
@@ -1684,6 +1691,11 @@ async def streak_monitor():
                 elapsed = now_ts - last
                 user = bot.get_user(int(uid))
                 if not user:
+                    try:
+                        user = await bot.fetch_user(int(uid))
+                    except Exception:
+                        user = None
+                if not user:
                     continue
 
                 # ⚠️ Avertissement (une seule fois)
@@ -1706,7 +1718,8 @@ async def streak_monitor():
                         pass
 
             if updated:
-                _save_daily(daily)
+                async with _daily_lock:
+                    _save_daily(daily)
 
         except Exception as e:
             logging.exception("Erreur dans streak_monitor: %s", e)
@@ -1723,6 +1736,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
