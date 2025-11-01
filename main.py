@@ -410,7 +410,7 @@ def _ensure_quests_exists():
                     }
                 },
                 "weekly": {
-                    "voice_120min": {
+                    "voice_500min": {
                         "name": "🔊 500 min en vocal (hebdo)",
                         "type": "voice_minutes",
                         "target": 500,
@@ -418,7 +418,7 @@ def _ensure_quests_exists():
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
-                    "messages_100": {
+                    "messages_200": {
                         "name": "✉️ 200 messages (hebdo)",
                         "type": "messages",
                         "target": 200,
@@ -753,7 +753,7 @@ async def daily_cmd(interaction: discord.Interaction):
 
     # Texte sympa
     streak_bar = "▰" * new_streak + "▱" * (STREAK_MAX - new_streak)
-    next_hint = "Reste à **20** si tu continues !" if new_streak == STREAK_MAX else f"Demain: **{STREAK_REWARDS[new_streak+1]}** pts"
+    next_hint = "Reste à **5** si tu continues !" if new_streak == STREAK_MAX else f"Demain: **{STREAK_REWARDS[new_streak+1]}** pts"
     await interaction.response.send_message(
         f"🗓️ Daily pris ! **+{reward}** pts → total **{new_total}**.\n"
         f"🔥 Streak: **{new_streak}/{STREAK_MAX}** `{streak_bar}` — {next_hint}",
@@ -1198,9 +1198,9 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     # Daily
     # après avoir calculé elapsed
     streak_preview = streak
-    if last_ts and (now_ts - last_ts) > 2 * DAILY_COOLDOWN:
-        streak_preview = 0  # le prochain claim repartira à 1
-    
+    if last_ts and (now_ts - last_ts) > STREAK_GRACE:
+        streak_preview = 0
+
     embed.add_field(
         name="🗓️ Daily",
         value=f"{daily_eta_txt}\nStreak: **{streak_preview}/{STREAK_MAX}**",
@@ -2152,17 +2152,29 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 delta_secs = max(0, now - start)
                 delta_min = delta_secs // 60
                 if delta_min > 0:
-                    date_str = _today_str()
+                    date_key = _today_str()
+                    week_key = _week_str()
                     async with _quests_progress_lock:
-                        pdb = _load_quests_progress()
-                        qcat = _load_quests().get("daily", {})
-                        for qkey, q in qcat.items():
+                        pdb  = _load_quests_progress()
+                        qcfg = _load_quests()
+        
+                        # DAILY
+                        for qkey, q in qcfg.get("daily", {}).items():
                             if q.get("type") == "voice_minutes":
-                                slot = _ensure_user_quest_slot(pdb, date_str, guild.id, member.id, qkey)
+                                slot = _ensure_user_quest_slot(pdb, "daily", date_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+        
+                        # WEEKLY
+                        for qkey, q in qcfg.get("weekly", {}).items():
+                            if q.get("type") == "voice_minutes":
+                                slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, member.id, qkey)
+                                slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+        
                         _save_quests_progress(pdb)
-            # nouvelle session
+        
+            # nouvelle session dans le nouveau salon
             _voice_sessions[key] = now
+
     except Exception:
         logging.exception("Erreur on_voice_state_update")
 
@@ -2425,6 +2437,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
