@@ -574,8 +574,9 @@ async def addpoints_cmd(interaction: discord.Interaction, membre: discord.Member
 
 @tree.command(name="removepoints", description="Retirer des points à un membre (admin seulement).")
 @guilds_decorator()
-@app_commands.describe(membre="Le membre à débiter", points="Nombre de points à retirer (>=1)")
+@app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(membre="Le membre à débiter", points="Nombre de points à retirer (>=1)")
 async def removepoints_cmd(interaction: discord.Interaction, membre: discord.Member, points: app_commands.Range[int, 1, 1_000_000]):
     new_total = await remove_points(membre.id, int(points))
     await interaction.response.send_message(f"✅ **{membre.display_name}** a maintenant **{new_total}** points (-{int(points)}).")
@@ -590,6 +591,7 @@ async def removepoints_cmd(interaction: discord.Interaction, membre: discord.Mem
 
 @tree.command(name="mp", description="Envoie un message privé à un membre ou à tout le serveur. (admin)")
 @guilds_decorator()
+@app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     cible="Le membre à qui envoyer le message (laisser vide pour tout le serveur)",
@@ -663,6 +665,7 @@ async def mp_cmd(
 
 @tree.command(name="setpoints", description="Définir le solde exact d'un membre (admin).")
 @guilds_decorator()
+@app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(membre="Le membre", points="Nouveau solde (>=0)")
 async def setpoints_cmd(interaction: discord.Interaction, membre: discord.Member, points: app_commands.Range[int,0,1_000_000]):
@@ -1214,6 +1217,7 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
 # ---------- /shopadmin : menu interactif (remplace l'ancien groupe) ----------
 @tree.command(name="shopadmin", description="Ouvre le panneau admin de la boutique (admins uniquement).")
 @guilds_decorator()
+@app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 async def shopadmin_menu(interaction: discord.Interaction):
 
@@ -1852,6 +1856,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
