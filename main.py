@@ -687,8 +687,6 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
         inline=True
     )
 
-    embed.add_field(name="🗓️ Daily", value=f"{daily_eta_txt}\nStreak: **{streak}/{STREAK_MAX}**", inline=True)
-
     # Dates (création compte & join serveur)
     if target.created_at:
         created_ts = int(target.created_at.replace(tzinfo=timezone.utc).timestamp())
@@ -781,10 +779,9 @@ async def boutique_cmd(interaction: discord.Interaction):
         return sorted(items, key=lambda x: (x["cost"], x["name"].lower()))
 
     # rendu "carte" d'un item
-    def render_card(i, it):
-        # petit “progress bar” unicode de l’accessibilité (prix vs solde)
+    def render_card(i, it, balance: int):
         cost = it["cost"]
-        have = min(user_points, cost)
+        have = min(balance, cost)
         filled = int((have / cost) * 10) if cost > 0 else 10
         bar = "▰" * filled + "▱" * (10 - filled) if cost > 0 else "──────────"
         lim_txt = "∞" if it["max_per"] < 0 else f"{max(0,it['max_per']-it['already'])}/{it['max_per']}"
@@ -821,7 +818,7 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
             title = f"🛒 Boutique — Page {self.page+1}/{total_pages}"
             desc_top = f"**Solde : {user_points} pts**\n"
             if page_items:
-                lines = [render_card(i, it) for i, it in enumerate(page_items, start=1)]
+                lines = [render_card(i, it, user_points) for i, it in enumerate(page_items, start=1)]
                 body = "\n\n".join(lines)
             else:
                 body = "_Aucun item sur cette page._"
@@ -1667,6 +1664,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
