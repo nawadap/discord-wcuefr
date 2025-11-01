@@ -38,7 +38,7 @@ ADMIN_LOG_CHANNEL_ID = int(os.getenv("ADMIN_LOG_CHANNEL_ID", "0"))
 INVITE_LOG_CHANNEL_ID = int(os.getenv("INVITE_LOG_CHANNEL_ID", "0"))
 
 # --- Paramètres ---
-INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "30"))
+INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "40"))
 
 # --- Verrous (internes, pas dans .env) ---
 _points_lock = asyncio.Lock()
@@ -395,17 +395,27 @@ def _load_invite_rewards() -> Dict[str, Dict[str, int]]:
 def _save_invite_rewards(data: Dict[str, Dict[str, int]]) -> None:
     _atomic_write(INVITE_REWARDS_DB_PATH, data)
 
-def _load_daily() -> Dict[str, int]:
-    """{ user_id(str): last_claim_ts(int, secondes UTC) }"""
+def _load_daily() -> Dict[str, dict]:
+    """{ user_id(str): { 'last': ts(int), 'streak': int } } (compat ancien format int)"""
     _ensure_daily_exists()
     with open(DAILY_DB_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    # cast en int par sûreté
-    return {str(k): int(v) for k, v in data.items()}
+        raw = json.load(f)
 
-def _save_daily(data: Dict[str, int]) -> None:
+    data: Dict[str, dict] = {}
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            last = int(v.get("last", 0))
+            streak = int(v.get("streak", 0))
+        else:
+            # Ancien format : juste un timestamp -> on démarre à streak 1 si déjà réclamé
+            last = int(v)
+            streak = 1 if last > 0 else 0
+        data[str(k)] = {"last": last, "streak": streak}
+    return data
+
+def _save_daily(data: Dict[str, dict]) -> None:
     _atomic_write(DAILY_DB_PATH, data)
-
+    
 def _format_cooldown(secs: float) -> str:
     s = int(round(secs))
     days, s = divmod(s, 86400)
@@ -445,10 +455,11 @@ class OwnedView(discord.ui.View):
 
 # ---------- Slash commands ----------
 
-DAILY_REWARD = 10          # à ta guise
 DAILY_COOLDOWN = 24*60*60  # 24h en secondes
+STREAK_MAX = 4
+STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
 
-@tree.command(name="daily", description="Réclame ta récompense quotidienne.")
+@tree.command(name="daily", description="Réclame ta récompense quotidienne (avec streak).")
 @guilds_decorator()
 async def daily_cmd(interaction: discord.Interaction):
     now_ts = int(datetime.now(timezone.utc).timestamp())
@@ -456,26 +467,46 @@ async def daily_cmd(interaction: discord.Interaction):
 
     async with _daily_lock:
         daily = _load_daily()
-        last = int(daily.get(uid, 0))
-        elapsed = now_ts - last
+        state = daily.get(uid, {"last": 0, "streak": 0})
+        last = int(state.get("last", 0))
+        streak = int(state.get("streak", 0))
+        elapsed = now_ts - last if last else None
 
-        if last > 0 and elapsed < DAILY_COOLDOWN:
+        # encore en cooldown 24h
+        if last and elapsed is not None and elapsed < DAILY_COOLDOWN:
             remain = DAILY_COOLDOWN - elapsed
             joli = _format_cooldown(remain)
             expire = now_ts + remain
-            # Affiche aussi l’heure relative Discord <t:...:R>
             return await interaction.response.send_message(
                 f"⏳ Tu as déjà pris ton daily. Réessaie dans {joli} ( <t:{expire}:R> ).",
                 ephemeral=True
             )
 
-        # ok : on crédite, on enregistre le nouveau timestamp
-        new_total = await add_points(interaction.user.id, DAILY_REWARD)
-        daily[uid] = now_ts
+        # Déterminer le nouveau streak :
+        # - si première prise : streak=1
+        # - si pris après 24h et avant 48h : streak+1 (plafonné à 4)
+        # - si >48h (jour manqué) : reset à 1
+        if not last:
+            new_streak = 1
+        else:
+            if elapsed <= 2 * DAILY_COOLDOWN:
+                new_streak = min(streak + 1, STREAK_MAX)
+            else:
+                new_streak = 1  # jour manqué -> reset
+
+        reward = STREAK_REWARDS.get(new_streak, STREAK_REWARDS[STREAK_MAX])
+
+        # Créditer & enregistrer
+        new_total = await add_points(interaction.user.id, reward)
+        daily[uid] = {"last": now_ts, "streak": new_streak}
         _save_daily(daily)
 
+    # Texte sympa
+    streak_bar = "▰" * new_streak + "▱" * (STREAK_MAX - new_streak)
+    next_hint = "Reste à **20** si tu continues !" if new_streak == STREAK_MAX else f"Demain: **{STREAK_REWARDS[new_streak+1]}** pts"
     await interaction.response.send_message(
-        f"🗓️ Daily pris ! +**{DAILY_REWARD}** points → total **{new_total}**.",
+        f"🗓️ Daily pris ! **+{reward}** pts → total **{new_total}**.\n"
+        f"🔥 Streak: **{new_streak}/{STREAK_MAX}** `{streak_bar}` — {next_hint}",
         ephemeral=True
     )
 
@@ -590,10 +621,13 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
 
     # Daily status (si tu utilises déjà DAILY_DB)
     last_ts = 0
+    streak = 0
     try:
         async with _daily_lock:
             daily = _load_daily()
-            last_ts = int(daily.get(uid, 0))
+            st = daily.get(uid, {"last": 0, "streak": 0})
+            last_ts = int(st.get("last", 0))
+            streak = int(st.get("streak", 0))
     except Exception:
         pass
 
@@ -604,9 +638,8 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
         elapsed = now_ts - last_ts
         if elapsed < DAILY_COOLDOWN:
             remain = DAILY_COOLDOWN - elapsed
-            daily_ready = False
             daily_eta_txt = f"⏳ Dans { _format_cooldown(remain) } ( <t:{now_ts + remain}:R> )"
-
+            
     # --- Détails achats (jolis labels depuis shop) ---
     async with _shop_lock:
         shop_snapshot = _load_shop()
@@ -643,7 +676,18 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     embed.add_field(name="📨 Invitations", value=f"**{invites}**", inline=True)
 
     # Daily
-    embed.add_field(name="🗓️ Daily", value=daily_eta_txt, inline=True)
+    # après avoir calculé elapsed
+    streak_preview = streak
+    if last_ts and (now_ts - last_ts) > 2 * DAILY_COOLDOWN:
+        streak_preview = 0  # le prochain claim repartira à 1
+    
+    embed.add_field(
+        name="🗓️ Daily",
+        value=f"{daily_eta_txt}\nStreak: **{streak_preview}/{STREAK_MAX}**",
+        inline=True
+    )
+
+    embed.add_field(name="🗓️ Daily", value=f"{daily_eta_txt}\nStreak: **{streak}/{STREAK_MAX}**", inline=True)
 
     # Dates (création compte & join serveur)
     if target.created_at:
@@ -1623,6 +1667,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
