@@ -1669,14 +1669,27 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # ---------- Sync + Ready ----------
 @bot.event
 async def setup_hook():
+    # Supprimer la commande fantôme côté Discord
+    try:
+        print("🔍 Suppression de la commande 'active-dev-badge'...")
+        bot.tree.remove_command(
+            "active-dev-badge",
+            type=discord.AppCommandType.chat_input,  # slash command
+            guild=None  # None = global ; mets discord.Object(GUILD_ID) si c’était une commande de guilde
+        )
+        await bot.tree.sync()
+        print("✅ Commande supprimée et resync effectuée.")
+    except Exception as e:
+        print("❌ Erreur pendant la suppression :", e)
+
+    # Ton sync habituel
     if GUILD_ID:
-        cmds = await tree.sync(guild=discord.Object(id=GUILD_ID))
+        cmds = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         logging.info("Synced %d cmd(s) pour la guilde %s", len(cmds), GUILD_ID)
     else:
-        cmds = await tree.sync()
+        cmds = await bot.tree.sync()
         logging.info("Synced %d cmd(s) globales", len(cmds))
 
-    # ✅ Démarrage propre de la tâche background ici
     asyncio.create_task(streak_monitor())
 
 @bot.event
@@ -1851,6 +1864,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
