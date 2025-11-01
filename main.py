@@ -696,17 +696,191 @@ async def setpoints_cmd(interaction: discord.Interaction, membre: discord.Member
     await _send_admin_log(interaction.guild, interaction.user, "setpoints",
                           membre=f"{membre} ({membre.id})", points=int(points))
 
-@tree.command(name="classement", description="Afficher le classement des points.")
+# ---------- Classement paginé ----------
+
+def _medal(idx: int) -> str:
+    return "🥇" if idx == 0 else ("🥈" if idx == 1 else ("🥉" if idx == 2 else f"#{idx+1}"))
+
+def _progress_bar(value: int, top: int, width: int = 10) -> str:
+    if top <= 0:
+        return "▱" * width
+    filled = int(round((value / top) * width))
+    filled = max(0, min(width, filled))
+    return "▰" * filled + "▱" * (width - filled)
+
+async def _full_leaderboard(guild: discord.Guild) -> list[dict]:
+    """Retourne une liste triée: [{uid, pts, name, mention, in_guild}]"""
+    # Charge toutes les banques de points
+    data = _load_points()  # pas besoin de lock en lecture seule si on accepte un petit "lag"
+    # Trie par points desc puis uid pour stabilité
+    pairs = sorted(((int(uid), int(pts)) for uid, pts in data.items()),
+                   key=lambda x: (-x[1], x[0]))
+    results: list[dict] = []
+    for uid, pts in pairs:
+        member = guild.get_member(uid)
+        if member:
+            name = member.display_name
+            mention = member.mention
+            in_guild = True
+        else:
+            # essaie de récupérer un nom propre
+            try:
+                user = await guild._state.http.get_user(uid)  # petit trick low-level, sinon fetch_user
+                name = user.get("username", f"Utilisateur {uid}")
+            except Exception:
+                name = f"Utilisateur {uid}"
+            mention = f"<@{uid}>"
+            in_guild = False
+        results.append({"uid": uid, "pts": pts, "name": name, "mention": mention, "in_guild": in_guild})
+    return results
+
+def _render_lb_page(guild: discord.Guild, rows: list[dict], page: int, page_size: int,
+                    viewer_id: int | None = None) -> discord.Embed:
+    total = len(rows)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    slice_ = rows[start:start + page_size]
+    top_score = rows[0]["pts"] if rows else 0
+
+    lines: list[str] = []
+    for local_idx, row in enumerate(slice_):
+        global_idx = start + local_idx
+        medal = _medal(global_idx)
+        bar = _progress_bar(row["pts"], top_score, 12)
+        faded = " _(hors serveur)_" if not row["in_guild"] else ""
+        you = " **(toi)**" if viewer_id and row["uid"] == viewer_id else ""
+        lines.append(f"{medal} — **{row['name']}**{you}{faded}\n`{bar}` {row['pts']} pts")
+
+    if not lines:
+        desc = "_Aucune donnée pour le moment._"
+    else:
+        desc = "\n\n".join(lines)
+
+    title = f"🏆 Classement — Page {page+1}/{total_pages}"
+    embed = discord.Embed(title=title, description=desc, color=discord.Color.gold())
+    embed.set_footer(text=f"Total entrées: {total} • Taille page: {page_size}")
+    return embed
+
+class LeaderboardView(OwnedView):
+    def __init__(self, author_id: int, guild: discord.Guild, rows: list[dict], page: int, page_size: int):
+        super().__init__(author_id=author_id, timeout=120)
+        self.guild = guild
+        self.rows = rows
+        self.page = page
+        self.page_size = page_size
+        self.total_pages = max(1, (len(self.rows) + self.page_size - 1) // self.page_size)
+        self.update_children()
+
+    def update_children(self):
+        self.clear_items()
+        # Boutons de nav
+        btn_first = discord.ui.Button(emoji="⏮", style=discord.ButtonStyle.secondary)
+        btn_prev  = discord.ui.Button(emoji="◀️", style=discord.ButtonStyle.secondary)
+        btn_next  = discord.ui.Button(emoji="▶️", style=discord.ButtonStyle.secondary)
+        btn_last  = discord.ui.Button(emoji="⏭", style=discord.ButtonStyle.secondary)
+        btn_refresh = discord.ui.Button(emoji="🔄", style=discord.ButtonStyle.secondary)
+        btn_my = discord.ui.Button(label="🔎 Mon rang", style=discord.ButtonStyle.primary)
+        btn_goto = discord.ui.Button(label="Aller à la page…", style=discord.ButtonStyle.secondary)
+        btn_close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
+
+        btn_first.disabled = self.page <= 0
+        btn_prev.disabled  = self.page <= 0
+        btn_next.disabled  = self.page >= (self.total_pages - 1)
+        btn_last.disabled  = self.page >= (self.total_pages - 1)
+
+        async def _edit(i: discord.Interaction):
+            embed = _render_lb_page(self.guild, self.rows, self.page, self.page_size, viewer_id=i.user.id)
+            await i.response.edit_message(embed=embed, view=self)
+
+        async def first_cb(i: discord.Interaction): self.page = 0; await _edit(i)
+        async def prev_cb(i: discord.Interaction):  self.page = max(0, self.page-1); await _edit(i)
+        async def next_cb(i: discord.Interaction):  self.page = min(self.total_pages-1, self.page+1); await _edit(i)
+        async def last_cb(i: discord.Interaction):  self.page = self.total_pages-1; await _edit(i)
+
+        async def refresh_cb(i: discord.Interaction):
+            # Recharge frais (peut changer entre-temps)
+            new_rows = await _full_leaderboard(self.guild)
+            self.rows = new_rows
+            self.total_pages = max(1, (len(self.rows)+self.page_size-1)//self.page_size)
+            self.page = max(0, min(self.page, self.total_pages-1))
+            await _edit(i)
+
+        async def myrank_cb(i: discord.Interaction):
+            # Trouver la position de l'utilisateur
+            idx = next((n for n, r in enumerate(self.rows) if r["uid"] == i.user.id), None)
+            if idx is None:
+                # pas dans la liste (0 point ?)
+                try:
+                    await i.response.send_message("Tu n’apparais pas encore au classement (aucun point ?).", ephemeral=True)
+                except Exception:
+                    pass
+                return
+            self.page = idx // self.page_size
+            await _edit(i)
+
+        async def goto_cb(i: discord.Interaction):
+            class GotoModal(discord.ui.Modal, title="Aller à la page"):
+                page_field = discord.ui.TextInput(label="Numéro de page", placeholder=f"1..{self.total_pages}", min_length=1, max_length=5)
+                async def on_submit(self, mi: discord.Interaction):
+                    try:
+                        p = int(str(self.page_field))
+                        if p < 1 or p > self.parent.total_pages:
+                            raise ValueError
+                    except Exception:
+                        return await mi.response.send_message(f"❌ Page invalide. (1..{self.parent.total_pages})", ephemeral=True)
+                    self.parent.page = p-1
+                    embed = _render_lb_page(self.parent.guild, self.parent.rows, self.parent.page, self.parent.page_size, viewer_id=mi.user.id)
+                    await mi.response.edit_message(embed=embed, view=self.parent)
+            modal = GotoModal()
+            modal.parent = self  # pour accéder à la vue depuis le modal
+            await i.response.send_modal(modal)
+
+        async def close_cb(i: discord.Interaction):
+            await i.response.edit_message(content="Classement fermé.", embed=None, view=None)
+
+        btn_first.callback = first_cb
+        btn_prev.callback  = prev_cb
+        btn_next.callback  = next_cb
+        btn_last.callback  = last_cb
+        btn_refresh.callback = refresh_cb
+        btn_my.callback    = myrank_cb
+        btn_goto.callback  = goto_cb
+        btn_close.callback = close_cb
+
+        self.add_item(btn_first)
+        self.add_item(btn_prev)
+        self.add_item(btn_next)
+        self.add_item(btn_last)
+        self.add_item(btn_refresh)
+        self.add_item(btn_my)
+        self.add_item(btn_goto)
+        self.add_item(btn_close)
+
+@tree.command(name="classement", description="Afficher le classement des points (paginé).")
 @guilds_decorator()
-@app_commands.describe(top="Combien d'utilisateurs afficher (par défaut 10)")
-async def classement_cmd(interaction: discord.Interaction, top: app_commands.Range[int, 1, 50] = 10):
+@app_commands.describe(
+    page="Page à afficher (défaut 1)",
+    taille="Taille de page (5 à 25, défaut 10)"
+)
+async def classement_cmd(
+    interaction: discord.Interaction,
+    page: app_commands.Range[int, 1, 10_000] = 1,
+    taille: app_commands.Range[int, 5, 25] = 10
+):
     await interaction.response.defer(ephemeral=False)
-    lb = await get_leaderboard(interaction.guild, top=top)  # type: ignore
-    if not lb:
+    rows = await _full_leaderboard(interaction.guild)  # type: ignore
+    if not rows:
         return await interaction.followup.send("Aucun point enregistré pour le moment.")
-    lines = [f"**#{i}** — {name} : **{pts}**" for i, (name, pts) in enumerate(lb, start=1)]
-    embed = discord.Embed(title=f"🏆 Classement — Top {top}", description="\n".join(lines), color=discord.Color.gold())
-    await interaction.followup.send(embed=embed)
+
+    page0 = max(0, page - 1)
+    embed = _render_lb_page(interaction.guild, rows, page0, taille, viewer_id=interaction.user.id)  # type: ignore
+    view = LeaderboardView(author_id=interaction.user.id, guild=interaction.guild, rows=rows, page=page0, page_size=taille)  # type: ignore
+    msg = await interaction.followup.send(embed=embed, view=view)
+    try:
+        view.message = msg
+    except Exception:
+        pass
 
 @tree.command(name="profile", description="Affiche un profil (points, achats, invites).")
 @guilds_decorator()
@@ -1875,6 +2049,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
