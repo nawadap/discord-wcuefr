@@ -462,8 +462,6 @@ class OwnedView(discord.ui.View):
         except Exception:
             pass
 
-# ---------- Slash commands ----------
-
 # --- Streak (récompenses et tolérance) ---
 DAILY_COOLDOWN = 24 * 60 * 60  # 24h
 STREAK_MAX = 4
@@ -588,7 +586,80 @@ async def removepoints_cmd(interaction: discord.Interaction, membre: discord.Mem
         points=int(points),
         new_total=new_total
     )
-    
+
+@tree.command(name="mp", description="Envoie un message privé à un membre ou à tout le serveur. (admin)")
+@guilds_decorator()
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    cible="Le membre à qui envoyer le message (laisser vide pour tout le serveur)",
+    message="Le contenu du message à envoyer"
+)
+async def mp_cmd(
+    interaction: discord.Interaction,
+    cible: discord.Member | None,
+    message: str
+):
+    """Envoie un message privé à un membre ou à tout le serveur (admins uniquement)."""
+    guild = interaction.guild
+    sender = interaction.user
+
+    # --- MP individuel ---
+    if cible:
+        try:
+            await cible.send(message)
+            await interaction.response.send_message(
+                f"✅ Message envoyé à {cible.mention} en MP.", ephemeral=True
+            )
+            await _send_admin_log(guild, sender, "mp.send", cible=f"{cible} ({cible.id})", scope="unique")
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"⚠️ Impossible d’envoyer un message à {cible.mention} (MP fermés).",
+                ephemeral=True
+            )
+        return
+
+    # --- MP à tout le serveur ---
+    class ConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=30)
+
+        @discord.ui.button(label="✅ Confirmer l’envoi à tout le serveur", style=discord.ButtonStyle.danger)
+        async def confirm(self, i: discord.Interaction, _):
+            sent = 0
+            failed = 0
+            for m in guild.members:
+                if m.bot:
+                    continue
+                try:
+                    await m.send(message)
+                    sent += 1
+                    await asyncio.sleep(0.2)  # éviter le rate-limit
+                except discord.Forbidden:
+                    failed += 1
+                except Exception:
+                    failed += 1
+            await i.response.edit_message(
+                content=f"📨 Envoi terminé ! ✅ {sent} succès / ⚠️ {failed} échecs (MP fermés ou erreurs).",
+                view=None
+            )
+            await _send_admin_log(
+                guild, sender, "mp.broadcast",
+                total_members=len(guild.members),
+                sent=sent,
+                failed=failed
+            )
+
+        @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+        async def cancel(self, i: discord.Interaction, _):
+            await i.response.edit_message(content="Envoi annulé.", view=None)
+
+    await interaction.response.send_message(
+        "⚠️ Tu es sur le point d’envoyer **un message privé à tout le serveur**.\n"
+        "Clique sur **Confirmer** pour lancer l’envoi (cela peut prendre un moment).",
+        view=ConfirmView(),
+        ephemeral=True
+    )
+
 @tree.command(name="setpoints", description="Définir le solde exact d'un membre (admin).")
 @guilds_decorator()
 @app_commands.checks.has_permissions(administrator=True)
@@ -1669,6 +1740,56 @@ async def on_member_remove(member: discord.Member):
         text = f"👋 {member.mention} a quitté le serveur, invité·e par {inviter_mention} et a maintenant **{new_total}** invitation(s)."
         await _send_invite_log(guild, text)
 
+@bot.event
+async def on_message(message: discord.Message):
+    """Détecte les messages privés envoyés au bot."""
+    # On ignore les messages du bot lui-même
+    if message.author.bot:
+        return
+
+    # Si le message vient d’un DM (pas d’un serveur)
+    if isinstance(message.channel, discord.DMChannel):
+        user = message.author
+
+        # (Optionnel) Envoie un accusé de réception à l’auteur
+        try:
+            await message.channel.send("📩 Message reçu ! Un membre du staff pourra te répondre ici.")
+        except Exception:
+            pass
+
+        # 🔧 Envoie une copie dans un salon staff défini dans .env
+        if ADMIN_LOG_CHANNEL_ID:
+            channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(ADMIN_LOG_CHANNEL_ID)
+                except Exception:
+                    channel = None
+
+            if channel:
+                embed = discord.Embed(
+                    title="💬 Nouveau message privé reçu",
+                    color=discord.Color.blurple(),
+                    timestamp=datetime.now(timezone.utc)
+                )
+                embed.add_field(name="Auteur", value=f"{user.mention} (`{user.id}`)", inline=False)
+                embed.add_field(name="Contenu", value=message.content or "*[vide]*", inline=False)
+                if message.attachments:
+                    urls = "\n".join(a.url for a in message.attachments)
+                    embed.add_field(name="Pièces jointes", value=urls, inline=False)
+
+                try:
+                    await channel.send(embed=embed)
+                except Exception:
+                    pass
+
+        # Tu peux aussi stocker dans un JSON local si tu veux garder une trace historique
+        return
+
+    # 👇 N’oublie pas : pour que les autres commandes slash fonctionnent,
+    # tu dois propager le message à la commande handler si c’est dans un salon
+    await bot.process_commands(message)
+
 # ✅ GARDER (sans décorateur)
 async def streak_monitor():
     """Vérifie régulièrement les streaks daily et prévient les utilisateurs."""
@@ -1736,6 +1857,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
