@@ -1352,20 +1352,14 @@ async def boutique_cmd(interaction: discord.Interaction):
         status = "🟢 Achetable" if can_buy else ("🟡 Solde insuffisant" if not it["affordable"] else "🔴 Limite atteinte")
         role_txt = f" | rôle: <@&{it['role_id']}>" if it["role_id"] else ""
         desc = it["description"] or "_Aucune description_"
-        old = ""
-        if "base_cost" in it and it["base_cost"] > it["cost"]:
-            old = f" ~~{it['base_cost']}~~"  # prix barré
-        
+        old = f" ~~{it['base_cost']}~~" if ("base_cost" in it and it["base_cost"] > it["cost"]) else ""
         cost_line = f"— **{it['cost']}** pts{old}"
-        
-        role_txt = f" | rôle: <@&{it['role_id']}>" if it["role_id"] else ""
-        desc = it["description"] or "_Aucune description_"
-        
+    
         return (
-        f"""**{i}. {it['name']}** {cost_line}{role_txt}
-        {desc}
-        `{bar}`  •  {status}  •  limite: **{lim_txt}**
-        *{it['badges']}*"""
+    f"""**{i}. {it['name']}** {cost_line}{role_txt}
+    {desc}
+    `{bar}`  •  {status}  •  limite: **{lim_txt}**
+    *{it['badges']}*"""
         )
 
 
@@ -1492,7 +1486,14 @@ async def boutique_cmd(interaction: discord.Interaction):
                 recap.append(f"**Ton solde :** {me_pts} pts → **reste après achat :** {me_pts - final_cost} pts")
                 
                 embed = discord.Embed(title="🧾 Confirmer l’achat", description="\n".join(recap), color=discord.Color.orange())
-                view = ConfirmBuy(user_points=me_pts, user_id=interaction_inner.user.id, key=key, item=item, already=already)
+                view = ConfirmBuy(
+                    user_points=me_pts,
+                    user_id=interaction_inner.user.id,
+                    key=key,
+                    item={"cost": cost, "role_id": role_id, "description": item.get("description",""), "name": item.get("name", key)},
+                    already=already
+                )
+                view.final_cost = final_cost 
                 await interaction_inner.response.send_message(embed=embed, view=view, ephemeral=True)
                 try:
                     view.message = await interaction_inner.original_response()
@@ -1564,7 +1565,11 @@ async def boutique_cmd(interaction: discord.Interaction):
             self.key = key
             self.item = item
             self.already = already
-            self.cost = int(item.get("cost", 0))
+    
+            # --- IMPORTANT : prix remisé pour le pré-check
+            base_cost = int(item.get("cost", 0))
+            disc = 0.0
+            self.final_cost = base_cost
 
         async def on_timeout(self):
             # Appelle l’implémentation parent pour GRISER + EDIT le message
@@ -1572,7 +1577,7 @@ async def boutique_cmd(interaction: discord.Interaction):
 
         @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
         async def confirm(self, i: discord.Interaction, _):
-            if self.user_points < self.cost:
+            if self.user_points < self.final_cost:  # <<< utiliser le prix remisé
                 try:
                     await i.response.send_message("❌ Solde insuffisant au moment de la confirmation.", ephemeral=True)
                 except Exception:
@@ -2511,6 +2516,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
