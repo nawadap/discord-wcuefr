@@ -220,7 +220,7 @@ def _ensure_shop_exists():
                 },
                 "halloween": {
                   "name": "🎃 Titre Halloween",
-                  "cost": 100,
+                  "cost": 20,
                   "role_id": 1433190078737285231,
                   "description": "Attribue le rôle saisonnier d'Halloween ! Bouuhh.",
                   "max_per_user": 1
@@ -2437,6 +2437,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
