@@ -1272,17 +1272,6 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     if tier_label:
         embed.add_field(name="🎖️ Palier", value=tier_label, inline=True)
 
-    if tier_perks:
-        perks_txt = "• " + "\n• ".join(tier_perks)
-        embed.add_field(name="✨ Avantages", value=perks_txt, inline=False)
-
-    if tier_key == "or":
-        embed.add_field(
-            name="🏛️ Hall of Fame",
-            value="Membre du Hall of Fame — **aura dorée** activée sur ce profil.",
-            inline=False
-        )
-
     # Footer
     embed.set_footer(text=f"ID: {target.id}")
 
@@ -2550,6 +2539,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
