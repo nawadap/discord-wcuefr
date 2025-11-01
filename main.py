@@ -1751,12 +1751,6 @@ async def on_message(message: discord.Message):
     if isinstance(message.channel, discord.DMChannel):
         user = message.author
 
-        # (Optionnel) Envoie un accusé de réception à l’auteur
-        try:
-            await message.channel.send("📩 Message reçu ! Un membre du staff pourra te répondre ici.")
-        except Exception:
-            pass
-
         # 🔧 Envoie une copie dans un salon staff défini dans .env
         if ADMIN_LOG_CHANNEL_ID:
             channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
@@ -1857,6 +1851,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
