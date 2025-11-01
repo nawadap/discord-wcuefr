@@ -457,12 +457,12 @@ class OwnedView(discord.ui.View):
 
 # --- Streak (récompenses et tolérance) ---
 #DAILY_COOLDOWN = 24 * 60 * 60  # 24h
-DAILY_COOLDOWN = 20  # 24h
+DAILY_COOLDOWN = 3*60  # 24h
 STREAK_MAX = 4
 STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 # STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
-STREAK_WARNING_BEFORE = 10
+STREAK_WARNING_BEFORE = 2*60
 
 
 @tree.command(name="daily", description="Réclame ta récompense quotidienne (avec streak).")
@@ -504,7 +504,7 @@ async def daily_cmd(interaction: discord.Interaction):
 
         # Créditer & enregistrer
         new_total = await add_points(interaction.user.id, reward)
-        daily[uid] = {"last": now_ts, "streak": new_streak}
+        daily[uid] = {"last": now_ts, "streak": new_streak, "warned": False}
         _save_daily(daily)
 
     # Texte sympa
@@ -1598,6 +1598,9 @@ async def setup_hook():
         cmds = await tree.sync()
         logging.info("Synced %d cmd(s) globales", len(cmds))
 
+    # ✅ Démarrage propre de la tâche background ici
+    asyncio.create_task(streak_monitor())
+
 @bot.event
 async def on_ready():
     logging.basicConfig(level=logging.INFO)
@@ -1661,7 +1664,7 @@ async def on_member_remove(member: discord.Member):
         text = f"👋 {member.mention} a quitté le serveur, invité·e par {inviter_mention} et a maintenant **{new_total}** invitation(s)."
         await _send_invite_log(guild, text)
 
-@bot.loop.create_task
+# ✅ GARDER (sans décorateur)
 async def streak_monitor():
     """Vérifie régulièrement les streaks daily et prévient les utilisateurs."""
     await bot.wait_until_ready()
@@ -1676,6 +1679,7 @@ async def streak_monitor():
             for uid, state in list(daily.items()):
                 last = int(state.get("last", 0))
                 streak = int(state.get("streak", 0))
+                warned = bool(state.get("warned", False))
                 if not last or streak == 0:
                     continue
 
@@ -1684,16 +1688,19 @@ async def streak_monitor():
                 if not user:
                     continue
 
-                # ⚠️ Avertissement 30 min avant expiration
-                if STREAK_GRACE - STREAK_WARNING_BEFORE <= elapsed < STREAK_GRACE:
-                    try:
-                        await user.send("⚠️ **Votre daily streak expire bientôt !** Pense à le réclamer avant 30 minutes ⏰")
-                    except Exception:
-                        pass
+                # ⚠️ Avertissement (une seule fois)
+                if (STREAK_GRACE - STREAK_WARNING_BEFORE) <= elapsed < STREAK_GRACE:
+                    if not warned:
+                        try:
+                            await user.send("⚠️ **Votre daily streak expire bientôt !** (~30 min restantes) ⏰")
+                        except Exception:
+                            pass
+                        state["warned"] = True
+                        updated = True
 
                 # 💀 Expiration
                 elif elapsed >= STREAK_GRACE:
-                    daily[uid] = {"last": last, "streak": 0}
+                    daily[uid] = {"last": last, "streak": 0, "warned": False}
                     updated = True
                     try:
                         await user.send("💀 **Votre daily streak a expiré !** Tu repars à 0 😿")
@@ -1701,13 +1708,13 @@ async def streak_monitor():
                         pass
 
             if updated:
-                async with _daily_lock:
-                    _save_daily(daily)
+                _save_daily(daily)
 
         except Exception as e:
             logging.exception("Erreur dans streak_monitor: %s", e)
 
-        await asyncio.sleep(60)  # vérifie toutes les 60 secondes
+        # Tu peux mettre 300 (5 min) si tu veux encore moins de charge.
+        await asyncio.sleep(60)
 
 # ---------- Run ----------
 if __name__ == "__main__":
@@ -1718,6 +1725,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
