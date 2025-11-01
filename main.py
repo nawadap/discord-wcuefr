@@ -521,22 +521,41 @@ async def daily_cmd(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@tree.command(name="purchases", description="Voir ton historique d'achats boutique.")
+@tree.command(name="purchases", description="Voir l'historique d'achats boutique (toi ou un autre membre).")
 @guilds_decorator()
-async def purchases_cmd(interaction: discord.Interaction):
+@app_commands.describe(membre="(Optionnel) Le membre dont afficher les achats")
+async def purchases_cmd(
+    interaction: discord.Interaction,
+    membre: discord.Member | None = None
+):
+    target = membre or interaction.user  # type: ignore
+
+    # Si on essaie de voir quelqu'un d'autre sans être admin → refus
+    if target.id != interaction.user.id and not interaction.user.guild_permissions.administrator:  # type: ignore
+        return await interaction.response.send_message(
+            "⛔ Tu ne peux voir que **tes** achats. (Réservé aux admins pour les autres.)",
+            ephemeral=True
+        )
+
     async with _purchases_lock:
         p = _load_purchases()
-    items = p.get(str(interaction.user.id), {})
-    if not items:
-        return await interaction.response.send_message("🧾 Aucun achat enregistré pour toi.", ephemeral=True)
+    items = p.get(str(target.id), {})
 
-    # On récupère les noms jolis depuis le shop
+    if not items:
+        return await interaction.response.send_message(
+            f"🧾 Aucun achat enregistré pour **{target.display_name}**.",
+            ephemeral=True
+        )
+
+    # Noms jolis depuis le shop
     async with _shop_lock:
         shop = _load_shop()
-    lines = [f"**Achats de {interaction.user.display_name} :**"]
+
+    lines = [f"**Achats de {target.display_name} :**"]
     for key, count in items.items():
         label = shop.get(key, {}).get("name", key)
         lines.append(f"- {label} (`{key}`) × **{count}**")
+
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 @tree.command(name="invites", description="Voir le nombre d'invitations d'un membre.")
@@ -1856,6 +1875,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
