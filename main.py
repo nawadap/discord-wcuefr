@@ -40,6 +40,8 @@ PURCHASES_DB_PATH = os.getenv("PURCHASES_DB_PATH", "data/purchases.json")
 INVITES_DB_PATH = os.getenv("INVITES_DB_PATH", "data/invites.json")
 DAILY_DB_PATH = os.getenv("DAILY_DB_PATH", "data/daily.json")
 INVITE_REWARDS_DB_PATH = os.getenv("INVITE_REWARDS_DB_PATH", "data/invites_rewards.json")
+QUESTS_DB_PATH = os.getenv("QUESTS_DB_PATH", "data/quests.json")            
+QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")  
 
 # --- Salons de logs ---
 SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", "0"))
@@ -56,11 +58,16 @@ _purchases_lock = asyncio.Lock()
 _invites_lock = asyncio.Lock()
 _daily_lock = asyncio.Lock()
 _invite_rewards_lock = asyncio.Lock()
+_quests_lock = asyncio.Lock()
+_quests_progress_lock = asyncio.Lock()
 
+_voice_sessions: dict[tuple[int, int], int] = {}
 # ---------- Intents & client ----------
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
+intents.message_content = True    # <— nécessaire pour compter les messages
+intents.voice_states = True       # <— nécessaire pour suivre le vocal
 
 bot = commands.Bot(
     command_prefix=commands.when_mentioned, 
@@ -369,6 +376,62 @@ async def _send_invite_log(guild: discord.Guild, text: str):
         except Exception:
             pass
 # ---------- Helper ----------
+# ---------- Quêtes : JSON + helpers ----------
+def _ensure_quests_exists():
+    """Crée un petit catalogue de quêtes si absent."""
+    if not os.path.exists(QUESTS_DB_PATH):
+        with open(QUESTS_DB_PATH, "w", encoding="utf-8") as f:
+            # Deux quêtes quotidiennes par défaut
+            json.dump({
+                "daily": {
+                    "send_messages_20": {
+                        "name": "✉️ Envoyer 20 messages",
+                        "type": "messages",          # messages | voice_minutes
+                        "target": 20,
+                        "reward": 10,
+                        "reset": "daily",            # daily/weekly/etc. (on gère daily ici)
+                        "max_claims_per_reset": 1
+                    },
+                    "voice_30min": {
+                        "name": "🔊 Rester 30 min en vocal",
+                        "type": "voice_minutes",
+                        "target": 30,
+                        "reward": 10,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    }
+                }
+            }, f, ensure_ascii=False, indent=2)
+
+def _load_quests() -> dict:
+    _ensure_quests_exists()
+    with open(QUESTS_DB_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _ensure_quests_progress_exists():
+    if not os.path.exists(QUESTS_PROGRESS_DB_PATH):
+        with open(QUESTS_PROGRESS_DB_PATH, "w", encoding="utf-8") as f:
+            # structure: { "<date>": { "<guild_id>": { "<user_id>": { "<quest_key>": { "progress": int, "claimed": int }}}}}
+            json.dump({}, f)
+
+def _load_quests_progress() -> dict:
+    _ensure_quests_progress_exists()
+    with open(QUESTS_PROGRESS_DB_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _save_quests_progress(data: dict):
+    _atomic_write(QUESTS_PROGRESS_DB_PATH, data)
+
+def _today_str() -> str:
+    # on garde en UTC, c'est simple et robuste
+    return datetime.now(timezone.utc).date().isoformat()
+
+def _ensure_user_quest_slot(progress_db: dict, date_str: str, guild_id: int, user_id: int, quest_key: str) -> dict:
+    g = progress_db.setdefault(date_str, {}).setdefault(str(guild_id), {}).setdefault(str(user_id), {})
+    return g.setdefault(quest_key, {"progress": 0, "claimed": 0})
+
+def _get_user_all_quests(progress_db: dict, date_str: str, guild_id: int, user_id: int) -> dict:
+    return progress_db.get(date_str, {}).get(str(guild_id), {}).get(str(user_id), {})
 
 def _atomic_write(path: str, data: dict):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -469,6 +532,105 @@ STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
+@tree.command(name="quests", description="Voir les quêtes quotidiennes et réclamer les récompenses.")
+@guilds_decorator()
+async def quests_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    date_str = _today_str()
+    qcat = _load_quests().get("daily", {})
+    async with _quests_progress_lock:
+        pdb = _load_quests_progress()
+        user_map = _get_user_all_quests(pdb, date_str, interaction.guild.id, interaction.user.id)  # type: ignore
+
+    def render_embed() -> discord.Embed:
+        lines = []
+        for key, q in qcat.items():
+            name = q.get("name", key)
+            target = int(q.get("target", 0))
+            reward = int(q.get("reward", 0))
+            slot = user_map.get(key, {"progress": 0, "claimed": 0})
+            prog = int(slot.get("progress", 0))
+            claimed = int(slot.get("claimed", 0))
+            done = prog >= target
+            bar_width = 12
+            filled = max(0, min(bar_width, int(round((prog/target)*bar_width))) if target>0 else bar_width)
+            bar = "▰"*filled + "▱"*(bar_width-filled)
+            status = "✅ **Prête à réclamer**" if (done and claimed < int(q.get("max_claims_per_reset",1))) else ("🟡 En cours" if not done else "💠 Déjà réclamée")
+            lines.append(
+                f"**{name}** — Récompense: **{reward}** pts\n"
+                f"`{bar}` {min(prog,target)}/{target} • {status}"
+            )
+        desc = "\n\n".join(lines) if lines else "_Aucune quête aujourd’hui_"
+        embed = discord.Embed(
+            title=f"🗺️ Quêtes quotidiennes — {date_str}",
+            description=desc,
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text="Les quêtes se remettent à zéro chaque jour (UTC).")
+        return embed
+
+    class QuestsView(OwnedView):
+        def __init__(self, author_id: int):
+            super().__init__(author_id=author_id, timeout=90)
+            # Un bouton "Réclamer tout", et un "Rafraîchir"
+            self.btn_claim_all = discord.ui.Button(label="🎁 Réclamer ce qui est prêt", style=discord.ButtonStyle.success)
+            self.btn_refresh   = discord.ui.Button(emoji="🔄", style=discord.ButtonStyle.secondary)
+            self.add_item(self.btn_claim_all)
+            self.add_item(self.btn_refresh)
+
+            async def claim_all_cb(i: discord.Interaction):
+                gained = 0
+                async with _quests_progress_lock:
+                    pdb = _load_quests_progress()
+                    user_all = _get_user_all_quests(pdb, date_str, i.guild.id, i.user.id)  # type: ignore
+                    changed = False
+                    for key, q in qcat.items():
+                        target = int(q.get("target", 0))
+                        reward = int(q.get("reward", 0))
+                        max_claims = int(q.get("max_claims_per_reset", 1))
+                        slot = user_all.setdefault(key, {"progress": 0, "claimed": 0})
+                        prog = int(slot.get("progress", 0))
+                        claimed = int(slot.get("claimed", 0))
+                        if prog >= target and claimed < max_claims:
+                            slot["claimed"] = claimed + 1
+                            gained += reward
+                            changed = True
+                    if changed:
+                        _save_quests_progress(pdb)
+
+                if gained > 0:
+                    new_total = await add_points(i.user.id, gained)
+                    await i.response.edit_message(embed=render_embed(), view=self)
+                    await i.followup.send(f"✅ Récompenses réclamées : **+{gained}** pts → total **{new_total}**.", ephemeral=True)
+                    try:
+                        await _send_admin_log(i.guild, i.user, "quests.claim_all", gained=gained, total=new_total)  # type: ignore
+                    except Exception:
+                        pass
+                else:
+                    await i.response.edit_message(embed=render_embed(), view=self)
+                    try:
+                        await i.followup.send("Rien à réclamer pour l’instant.", ephemeral=True)
+                    except Exception:
+                        pass
+
+            async def refresh_cb(i: discord.Interaction):
+                # recharger PDB frais
+                async with _quests_progress_lock:
+                    pdb2 = _load_quests_progress()
+                    user_map.clear()
+                    user_map.update(_get_user_all_quests(pdb2, date_str, i.guild.id, i.user.id))  # type: ignore
+                await i.response.edit_message(embed=render_embed(), view=self)
+
+            self.btn_claim_all.callback = claim_all_cb
+            self.btn_refresh.callback   = refresh_cb
+
+    view = QuestsView(author_id=interaction.user.id)
+    await interaction.followup.send(embed=render_embed(), view=view, ephemeral=True)
+    try:
+        view.message = await interaction.original_response()
+    except Exception:
+        pass
 
 @tree.command(name="daily", description="Réclame ta récompense quotidienne.")
 @guilds_decorator()
@@ -1866,6 +2028,61 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 # ---------- Sync + Ready ----------
 @bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    # Ignore les bots
+    if member.bot:
+        return
+    guild = member.guild
+    key = (guild.id, member.id)
+    now = int(datetime.now(timezone.utc).timestamp())
+
+    was_in = before.channel is not None
+    now_in = after.channel is not None
+
+    try:
+        # Début de session
+        if not was_in and now_in:
+            _voice_sessions[key] = now
+
+        # Fin de session
+        elif was_in and not now_in:
+            start = _voice_sessions.pop(key, None)
+            if start:
+                delta_secs = max(0, now - start)
+                delta_min = delta_secs // 60
+                if delta_min > 0:
+                    date_str = _today_str()
+                    async with _quests_progress_lock:
+                        pdb = _load_quests_progress()
+                        qcat = _load_quests().get("daily", {})
+                        for qkey, q in qcat.items():
+                            if q.get("type") == "voice_minutes":
+                                slot = _ensure_user_quest_slot(pdb, date_str, guild.id, member.id, qkey)
+                                slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+                        _save_quests_progress(pdb)
+
+        # Changement de salon vocal (on clôture + rouvre pour être simple)
+        elif was_in and now_in and before.channel != after.channel:
+            start = _voice_sessions.pop(key, None)
+            if start:
+                delta_secs = max(0, now - start)
+                delta_min = delta_secs // 60
+                if delta_min > 0:
+                    date_str = _today_str()
+                    async with _quests_progress_lock:
+                        pdb = _load_quests_progress()
+                        qcat = _load_quests().get("daily", {})
+                        for qkey, q in qcat.items():
+                            if q.get("type") == "voice_minutes":
+                                slot = _ensure_user_quest_slot(pdb, date_str, guild.id, member.id, qkey)
+                                slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+                        _save_quests_progress(pdb)
+            # nouvelle session
+            _voice_sessions[key] = now
+    except Exception:
+        logging.exception("Erreur on_voice_state_update")
+
+@bot.event
 async def setup_hook():
     if GUILD_ID:
         cmds = await tree.sync(guild=discord.Object(id=GUILD_ID))
@@ -1874,7 +2091,7 @@ async def setup_hook():
         cmds = await tree.sync()
         logging.info("Synced %d cmd(s) globales", len(cmds))
 
-    # ✅ Démarrage propre de la tâche background ici
+    asyncio.create_task(quests_midnight_rollover())
     asyncio.create_task(streak_monitor())
 
 @bot.event
@@ -1980,9 +2197,53 @@ async def on_message(message: discord.Message):
 
     # 👇 N’oublie pas : pour que les autres commandes slash fonctionnent,
     # tu dois propager le message à la commande handler si c’est dans un salon
+        # --- Quêtes: compter les messages en serveur ---
+    if message.guild and not message.author.bot:
+        date_str = _today_str()
+        async with _quests_progress_lock:
+            pdb = _load_quests_progress()
+            # incrémenter la quête "messages" si existe
+            # on ne sait pas le nom exact ici, donc on parcourt le catalogue "daily"
+            qcat = _load_quests().get("daily", {})
+            for qkey, q in qcat.items():
+                if q.get("type") == "messages":
+                    slot = _ensure_user_quest_slot(pdb, date_str, message.guild.id, message.author.id, qkey)
+                    slot["progress"] = int(slot.get("progress", 0)) + 1
+            _save_quests_progress(pdb)
     await bot.process_commands(message)
 
-# ✅ GARDER (sans décorateur)
+async def quests_midnight_rollover():
+    """À chaque minute, si on passe un jour UTC, on coupe les sessions vocales et on range la progression au bon jour."""
+    await bot.wait_until_ready()
+    last_day = _today_str()
+    while not bot.is_closed():
+        try:
+            now_day = _today_str()
+            if now_day != last_day:
+                # On ferme proprement toutes les sessions vocales ouvertes (créditées sur "hier").
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                closings = list(_voice_sessions.items())
+                _voice_sessions.clear()
+                if closings:
+                    async with _quests_progress_lock:
+                        pdb = _load_quests_progress()
+                        qcat = _load_quests().get("daily", {})
+                        for (guild_id, user_id), start in closings:
+                            delta_min = max(0, (now_ts - start) // 60)
+                            if delta_min <= 0:
+                                continue
+                            # Créditer sur "hier"
+                            date_str = last_day
+                            for qkey, q in qcat.items():
+                                if q.get("type") == "voice_minutes":
+                                    slot = _ensure_user_quest_slot(pdb, date_str, guild_id, user_id, qkey)
+                                    slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+                        _save_quests_progress(pdb)
+                last_day = now_day
+        except Exception:
+            logging.exception("Erreur quests_midnight_rollover")
+        await asyncio.sleep(60)
+
 async def streak_monitor():
     """Vérifie régulièrement les streaks daily et prévient les utilisateurs."""
     await bot.wait_until_ready()
@@ -2043,12 +2304,13 @@ async def streak_monitor():
 # ---------- Run ----------
 if __name__ == "__main__":
     # Crée les fichiers si absents
-    for ensure in ( _ensure_points_exists, _ensure_shop_exists, _ensure_purchases_exists ):
+    for ensure in (_ensure_points_exists, _ensure_shop_exists, _ensure_purchases_exists, _ensure_quests_exists, _ensure_quests_progress_exists):
         try:
             ensure()
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
