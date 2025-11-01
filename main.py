@@ -935,6 +935,7 @@ async def mp_cmd(
 
         @discord.ui.button(label="✅ Confirmer l’envoi à tout le serveur", style=discord.ButtonStyle.danger)
         async def confirm(self, i: discord.Interaction, _):
+            await i.response.defer() 
             sent = 0
             failed = 0
             for m in guild.members:
@@ -948,7 +949,7 @@ async def mp_cmd(
                     failed += 1
                 except Exception:
                     failed += 1
-            await i.response.edit_message(
+            await i.edit_original_response(
                 content=f"📨 Envoi terminé ! ✅ {sent} succès / ⚠️ {failed} échecs (MP fermés ou erreurs).",
                 view=None
             )
@@ -1271,6 +1272,11 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     # Palier + avantages + Hall of Fame
     if tier_label:
         embed.add_field(name="🎖️ Palier", value=tier_label, inline=True)
+        
+    if isinstance(target, discord.Member):
+        disc = int(shop_discount_for(target)*100)
+        if disc:
+            embed.add_field(name="💸 Remise boutique", value=f"**-{disc}%**", inline=True)
 
     # Footer
     embed.set_footer(text=f"ID: {target.id}")
@@ -1600,12 +1606,11 @@ async def boutique_cmd(interaction: discord.Interaction):
 
         @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
         async def confirm(self, i: discord.Interaction, _):
-            if self.user_points < self.final_cost:  # <<< utiliser le prix remisé
-                try:
-                    await i.response.send_message("❌ Solde insuffisant au moment de la confirmation.", ephemeral=True)
-                except Exception:
-                    pass
-                return
+            async with _points_lock:
+                d = _load_points()
+                current_pts = int(d.get(str(self.user_id), 0))
+            if current_pts < self.final_cost:
+                return await i.response.send_message("❌ Solde insuffisant au moment de la confirmation.", ephemeral=True)
             await _handle_purchase(i, self.key)
             try:
                 msg = await i.original_response()
@@ -2539,6 +2544,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
