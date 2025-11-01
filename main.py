@@ -408,6 +408,31 @@ def _format_cooldown(secs: float) -> str:
     if minutes: parts.append(f"{minutes}m")
     if s or not parts: parts.append(f"{s}s")
     return " ".join(parts)
+    
+# ---------- Views helpers (timeout = griser les composants) ----------
+class OwnedView(discord.ui.View):
+    """View qui sait griser ses composants au timeout et restreindre l’usage à son auteur (optionnel)."""
+    def __init__(self, author_id: int, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.author_id = author_id
+        self.message: discord.Message | None = None  # rempli après l’envoi du message qui porte la View
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Optionnel: utile si un jour tu postes la View en non-ephemeral.
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Tu ne peux pas utiliser ce panneau.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        # Griser visuellement tous les composants quand la View expire
+        for c in self.children:
+            c.disabled = True
+        try:
+            if self.message:
+                await self.message.edit(view=self)
+        except Exception:
+            pass
 
 # ---------- Slash commands ----------
 
@@ -726,14 +751,14 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
         return items[start:start+PAGE_SIZE]
 
     # Vue navigateur
-    class ShopBrowser(discord.ui.View):
-        def __init__(self, items: list[dict], page: int = 0, sort_mode: str = "price_asc"):
-            super().__init__(timeout=120)
+    class ShopBrowser(OwnedView):
+        def __init__(self, author_id: int, items: list[dict], page: int = 0, sort_mode: str = "price_asc"):
+            super().__init__(author_id=author_id, timeout=120)
             self.items_all = items
             self.sort_mode = sort_mode
             self.page = page
             self.update_children()
-    
+
         # helpers
         async def _render_embed(self, user: discord.User | discord.Member, user_points: int):
             items_sorted = sort_items(self.items_all, self.sort_mode)
@@ -835,7 +860,11 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
                 embed = discord.Embed(title="🧾 Confirmer l’achat", description="\n".join(recap), color=discord.Color.orange())
                 view = ConfirmBuy(user_points=me_pts, user_id=interaction_inner.user.id, key=key, item=item, already=already)
                 await interaction_inner.response.send_message(embed=embed, view=view, ephemeral=True)
-    
+                try:
+                    view.message = await interaction_inner.original_response()
+                except Exception:
+                    pass
+
             buy_select.callback = buy_callback
             self.add_item(buy_select)
     
@@ -893,9 +922,9 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
             self.add_item(btn_close)
 
     # Vue de confirmation (reprend ta logique existante)
-    class ConfirmBuy(discord.ui.View):
+    class ConfirmBuy(OwnedView):
         def __init__(self, user_points: int, user_id: int, key: str, item: dict, already: int):
-            super().__init__(timeout=45)
+            super().__init__(author_id=user_id, timeout=45)
             self.user_points = user_points
             self.user_id = user_id
             self.key = key
@@ -933,10 +962,15 @@ f"""**{i}. {it['name']}** — **{cost}** pts{role_txt}
                     pass
 
     # --- ouverture initiale ---
-    view = ShopBrowser(items=list(enriched), page=0, sort_mode="price_asc")
+    view = ShopBrowser(author_id=interaction.user.id, items=list(enriched), page=0, sort_mode="price_asc")
     embed = await view._render_embed(interaction.user, user_points)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-  
+    # enregistrer le message pour pouvoir le griser au timeout
+    try:
+        view.message = await interaction.original_response()
+    except Exception:
+        pass
+        
 async def _try_add_role(member: discord.Member, role: discord.Role, reason: str) -> tuple[bool, str]:
     guild = member.guild
     me = guild.me
@@ -1580,6 +1614,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
