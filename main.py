@@ -470,7 +470,7 @@ STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
 
-@tree.command(name="daily", description="Réclame ta récompense quotidienne (avec streak).")
+@tree.command(name="daily", description="Réclame ta récompense quotidienne.")
 @guilds_decorator()
 async def daily_cmd(interaction: discord.Interaction):
     now_ts = int(datetime.now(timezone.utc).timestamp())
@@ -521,7 +521,7 @@ async def daily_cmd(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@tree.command(name="purchases", description="Voir l'historique d'achats boutique (toi ou un autre membre).")
+@tree.command(name="purchases", description="Voir l'historique d'achats boutique.")
 @guilds_decorator()
 @app_commands.describe(membre="(Optionnel) Le membre dont afficher les achats")
 async def purchases_cmd(
@@ -574,7 +574,7 @@ async def invites_cmd(interaction: discord.Interaction, membre: discord.Member |
 async def ping_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("Pong 🏓", ephemeral=True)
 
-@tree.command(name="addpoints", description="Ajouter des points à un membre (admin seulement).")
+@tree.command(name="addpoints", description="Ajouter des points à un membre (admin).")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
@@ -591,7 +591,7 @@ async def addpoints_cmd(interaction: discord.Interaction, membre: discord.Member
         new_total=new_total
     )
 
-@tree.command(name="removepoints", description="Retirer des points à un membre (admin seulement).")
+@tree.command(name="removepoints", description="Retirer des points à un membre (admin).")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
@@ -621,7 +621,7 @@ async def mp_cmd(
     cible: discord.Member | None,
     message: str
 ):
-    """Envoie un message privé à un membre ou à tout le serveur (admins uniquement)."""
+    """Envoie un message privé à un membre ou à tout le serveur (admin)."""
     guild = interaction.guild
     sender = interaction.user
 
@@ -857,7 +857,7 @@ class LeaderboardView(OwnedView):
         self.add_item(btn_goto)
         self.add_item(btn_close)
 
-@tree.command(name="classement", description="Afficher le classement des points (paginé).")
+@tree.command(name="classement", description="Afficher le classement des points.")
 @guilds_decorator()
 @app_commands.describe(
     page="Page à afficher (défaut 1)",
@@ -1408,7 +1408,7 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
 
 
 # ---------- /shopadmin : menu interactif (remplace l'ancien groupe) ----------
-@tree.command(name="shopadmin", description="Ouvre le panneau admin de la boutique (admins uniquement).")
+@tree.command(name="shopadmin", description="Ouvre le panneau admin de la boutique (admin).")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
@@ -2049,6 +2049,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
