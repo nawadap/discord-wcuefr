@@ -384,6 +384,22 @@ def _ensure_quests_exists():
             # Daily + Weekly par défaut (selon ta demande)
             json.dump({
                 "daily": {
+                    "voice_30min": {
+                        "name": "🔊 30 min en vocal (daily)",
+                        "type": "voice_minutes",          # messages | voice_minutes | invites
+                        "target": 30,
+                        "reward": 10,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    },
+                    "messages_20": {
+                        "name": "✉️ 20 messages (daily)",
+                        "type": "messages",          # messages | voice_minutes | invites
+                        "target": 20,
+                        "reward": 10,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    },
                     "invite_1": {
                         "name": "🤝 Inviter 1 membre",
                         "type": "invites",          # messages | voice_minutes | invites
@@ -395,17 +411,17 @@ def _ensure_quests_exists():
                 },
                 "weekly": {
                     "voice_120min": {
-                        "name": "🔊 120 min en vocal (hebdo)",
+                        "name": "🔊 500 min en vocal (hebdo)",
                         "type": "voice_minutes",
-                        "target": 120,
+                        "target": 500,
                         "reward": 40,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
                     "messages_100": {
-                        "name": "✉️ 100 messages (hebdo)",
+                        "name": "✉️ 200 messages (hebdo)",
                         "type": "messages",
-                        "target": 100,
+                        "target": 200,
                         "reward": 30,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
@@ -2409,6 +2425,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
