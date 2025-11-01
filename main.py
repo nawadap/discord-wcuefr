@@ -49,7 +49,7 @@ ADMIN_LOG_CHANNEL_ID = int(os.getenv("ADMIN_LOG_CHANNEL_ID", "0"))
 INVITE_LOG_CHANNEL_ID = int(os.getenv("INVITE_LOG_CHANNEL_ID", "0"))
 
 # --- Paramètres ---
-INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "40"))
+INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "20"))
 
 # --- Verrous (internes, pas dans .env) ---
 _points_lock = asyncio.Lock()
@@ -208,13 +208,13 @@ def _ensure_shop_exists():
             json.dump({
                 "robux100": {
                     "name": "💸 100 Robux",
-                    "cost": 1000,
+                    "cost": 2000,
                     "description": "Échange manuel : contacte un admin.",
                     "max_per_user": -1   # illimité
                 },
                 "robux1000": {
                     "name": "💸 1000 Robux",
-                    "cost": 9500,
+                    "cost": 19500,
                     "description": "Échange manuel : contacte un admin.",
                     "max_per_user": -1   # illimité
                 },
@@ -388,7 +388,7 @@ def _ensure_quests_exists():
                         "name": "🔊 30 min en vocal (daily)",
                         "type": "voice_minutes",          # messages | voice_minutes | invites
                         "target": 30,
-                        "reward": 10,
+                        "reward": 5,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
@@ -396,7 +396,7 @@ def _ensure_quests_exists():
                         "name": "✉️ 20 messages (daily)",
                         "type": "messages",          # messages | voice_minutes | invites
                         "target": 20,
-                        "reward": 10,
+                        "reward": 5,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
@@ -404,7 +404,7 @@ def _ensure_quests_exists():
                         "name": "🤝 Inviter 1 membre",
                         "type": "invites",          # messages | voice_minutes | invites
                         "target": 1,
-                        "reward": 10,
+                        "reward": 5,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     }
@@ -414,7 +414,7 @@ def _ensure_quests_exists():
                         "name": "🔊 500 min en vocal (hebdo)",
                         "type": "voice_minutes",
                         "target": 500,
-                        "reward": 40,
+                        "reward": 20,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -422,7 +422,7 @@ def _ensure_quests_exists():
                         "name": "✉️ 200 messages (hebdo)",
                         "type": "messages",
                         "target": 200,
-                        "reward": 30,
+                        "reward": 20,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -430,7 +430,7 @@ def _ensure_quests_exists():
                         "name": "🤝 3 invitations (hebdo)",
                         "type": "invites",
                         "target": 3,
-                        "reward": 60,
+                        "reward": 20,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     }
@@ -588,7 +588,7 @@ class OwnedView(discord.ui.View):
 # --- Streak (récompenses et tolérance) ---
 DAILY_COOLDOWN = 24 * 60 * 60  # 24h
 STREAK_MAX = 4
-STREAK_REWARDS = {1: 5, 2: 10, 3: 15, 4: 20}
+STREAK_REWARDS = {1: 2, 2: 3, 3: 4, 4: 5}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
@@ -2425,6 +2425,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
