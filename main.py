@@ -2390,11 +2390,34 @@ async def on_member_join(member: discord.Member):
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
-    inviter_id, new_total = await _remove_invite_for_member(member.id)
+    inviter_id, new_total = await _remove_invite_for_member(member.id)  # décrémente et récupère le parrain & nouveau total
+    actor = bot.user or member  # qui "log" l’info (le bot)
+
     if inviter_id is not None:
-        inviter_mention = f"<@{inviter_id}>"
-        text = f"👋 {member.mention} a quitté le serveur, invité·e par {inviter_mention} et a maintenant **{new_total}** invitation(s)."
-        await _send_invite_log(guild, text)
+        # On essaie d’avoir un bel affichage pour l’inviteur
+        try:
+            inviter = guild.get_member(inviter_id) or await bot.fetch_user(inviter_id)
+            inviter_label = f"{inviter} ({inviter_id})"
+        except Exception:
+            inviter_label = f"ID {inviter_id}"
+
+        await _send_admin_log(
+            guild,
+            actor,
+            "member.leave",
+            membre=f"{member} ({member.id})",
+            inviteur=inviter_label,
+            invites_total=new_total
+        )
+    else:
+        # Aucun parrain trouvé (vanity/permissions/cache)
+        await _send_admin_log(
+            guild,
+            actor,
+            "member.leave",
+            membre=f"{member} ({member.id})",
+            inviteur="Non déterminé"
+        )
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -2561,6 +2584,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
