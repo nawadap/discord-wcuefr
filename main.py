@@ -2478,7 +2478,11 @@ async def on_member_join(member: discord.Member):
         except Exception:
             logging.exception("Erreur incrément quêtes invites")
 
-        await _send_invite_log(guild, f"👋 {member.mention} via code `{code}` par <@{inviter_id}> — total **{total}** invitation(s).")
+        await _send_invite_log(
+            guild,
+            f"🌿 {member.mention} s’avance dans le camp, guidé par {inviter.mention}. "
+            f"Son mentor compte désormais **{count}** guerrier(s) qu’il a amené dans le Clan."
+        )
         # Récompense points (une seule fois par invité unique)
         try:
             async with _invite_rewards_lock:
@@ -2497,7 +2501,7 @@ async def on_member_join(member: discord.Member):
                     # petit log / feedback côté staff (même salon que les joins si tu veux)
                     await _send_invite_log(
                         guild,
-                        f"🎁 +{INVITE_REWARD_POINTS} pts pour <@{inviter_id}> (nouveau total: **{new_total_pts}**) — premier join crédité de {member.mention}."
+                        f"🎁 +{int(round(INVITE_REWARD_POINTS * mul))} pts pour <@{inviter_id}> (nouveau total: **{new_total_pts}**) — premier join crédité de {member.mention}."
                     )
                 else:
                     # déjà récompensé par le passé → pas de points
@@ -2704,6 +2708,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
