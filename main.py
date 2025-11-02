@@ -863,16 +863,138 @@ async def purchases_cmd(
 
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-@tree.command(name="invites", description="Voir le nombre d'invitations d'un membre.")
+PER_PAGE = 15  # éléments par page
+class InviteListView(discord.ui.View):
+    def __init__(self, author_id: int, cible: discord.Member, total: int, rows: List[str]):
+        super().__init__(timeout=120)  # 2 min d'interactions possibles
+        self.author_id = author_id
+        self.cible = cible
+        self.total = total
+        self.rows = rows
+        self.page = 0
+        self.max_page = max((len(rows) - 1) // PER_PAGE, 0)
+        self._sync_buttons_state()
+
+    # Empêche les autres d'utiliser les boutons
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Seul·e l’auteur de la commande peut utiliser ces boutons.", ephemeral=True)
+            return False
+        return True
+
+    def _slice(self) -> List[str]:
+        start = self.page * PER_PAGE
+        end = start + PER_PAGE
+        return self.rows[start:end]
+
+    def _make_embed(self) -> discord.Embed:
+        lines = self._slice()
+        more = max(0, len(self.rows) - ((self.page + 1) * PER_PAGE))
+        desc_parts = [
+            f"**Total invitations :** **{self.total}**",
+            "**Invité·es :**" if lines else "_Aucun invité enregistré pour l’instant._"
+        ]
+        if lines:
+            desc_parts.append("\n".join(lines))
+        if more > 0:
+            desc_parts.append(f"_… et encore **{more}** autre(s) hors page._")
+
+        embed = discord.Embed(
+            title=f"📨 Invitations — {self.cible.display_name}",
+            description="\n\n".join(desc_parts),
+            color=discord.Color.gold()
+        )
+        if self.rows:
+            # Indique la pagination (ex: Page 1/4 – éléments 1–15 sur 53)
+            start_index = self.page * PER_PAGE + 1
+            end_index = min((self.page + 1) * PER_PAGE, len(self.rows))
+            embed.set_footer(text=f"Page {self.page + 1}/{self.max_page + 1} — éléments {start_index}–{end_index} sur {len(self.rows)} • ID: {self.cible.id}")
+        else:
+            embed.set_footer(text=f"ID: {self.cible.id}")
+        return embed
+
+    def _sync_buttons_state(self):
+        # Active/désactive selon la page
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if child.custom_id == "first":
+                    child.disabled = (self.page <= 0)
+                elif child.custom_id == "prev":
+                    child.disabled = (self.page <= 0)
+                elif child.custom_id == "next":
+                    child.disabled = (self.page >= self.max_page)
+                elif child.custom_id == "last":
+                    child.disabled = (self.page >= self.max_page)
+
+    async def _redraw(self, interaction: discord.Interaction):
+        self._sync_buttons_state()
+        await interaction.response.edit_message(embed=self._make_embed(), view=self)
+
+    @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, custom_id="first")
+    async def go_first(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = 0
+        await self._redraw(interaction)
+
+    @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary, custom_id="prev")
+    async def go_prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+        await self._redraw(interaction)
+
+    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary, custom_id="next")
+    async def go_next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page < self.max_page:
+            self.page += 1
+        await self._redraw(interaction)
+
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="last")
+    async def go_last(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = self.max_page
+        await self._redraw(interaction)
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.danger, custom_id="close")
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+    async def on_timeout(self) -> None:
+        # Désactive tout à la fin du délai
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
+@tree.command(name="invites", description="Voir le nombre d'invitations d'un membre, avec liste paginée des invités.")
 @guilds_decorator()
 @app_commands.describe(membre="Le membre (si vide, toi)")
 async def invites_cmd(interaction: discord.Interaction, membre: discord.Member | None = None):
     cible = membre or interaction.user  # type: ignore
-    total = await _get_invite_count(cible.id)
-    await interaction.response.send_message(
-        f"📨 **{cible.display_name}** a **{total}** invitation(s).",
-        ephemeral=True
-    )
+
+    # --- Récupération des données depuis invites.json ---
+    async with _invites_lock:
+        db = _load_invites()
+        total = int(db.get("counts", {}).get(str(cible.id), 0))
+        # refs: { member_id(str): inviter_id(int) }
+        invitee_ids = [int(mid) for mid, iid in db.get("refs", {}).items() if int(iid) == int(cible.id)]
+
+    # --- Préparation des lignes affichées ---
+    rows: List[Tuple[str, str]] = []
+    for mid in invitee_ids:
+        m = interaction.guild.get_member(mid)  # type: ignore
+        if m:
+            # Affiche mention + ID
+            rows.append((m.display_name.lower(), f"- {m.mention} (`{m.id}`)"))
+        else:
+            # Membre peut avoir quitté; on garde la mention par ID
+            rows.append((f"zzz-{mid}", f"- <@{mid}> (`{mid}`)"))
+
+    rows.sort(key=lambda x: x[0])
+    pretty_rows = [r[1] for r in rows]
+
+    view = InviteListView(author_id=interaction.user.id, cible=cible, total=total, rows=pretty_rows)
+
+    # Envoi initial
+    await interaction.response.send_message(embed=view._make_embed(), view=view, ephemeral=True)
 
 @tree.command(name="ping", description="Test rapide de réponse du bot.")
 @guilds_decorator()
@@ -2582,6 +2704,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
