@@ -2390,16 +2390,15 @@ async def on_member_join(member: discord.Member):
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
-    inviter_id, new_total = await _remove_invite_for_member(member.id)  # décrémente et récupère le parrain & nouveau total
-    actor = bot.user or member  # qui "log" l’info (le bot)
+    inviter_id, new_total = await _remove_invite_for_member(member.id)
+    actor = bot.user or member  # pour le log
 
     if inviter_id is not None:
-        # On essaie d’avoir un bel affichage pour l’inviteur
         try:
             inviter = guild.get_member(inviter_id) or await bot.fetch_user(inviter_id)
-            inviter_label = f"{inviter} ({inviter_id})"
+            inviter_label = f"{inviter} (<@{inviter_id}>)"
         except Exception:
-            inviter_label = f"ID {inviter_id}"
+            inviter_label = f"<@{inviter_id}> (inconnu)"
 
         await _send_admin_log(
             guild,
@@ -2410,7 +2409,6 @@ async def on_member_remove(member: discord.Member):
             invites_total=new_total
         )
     else:
-        # Aucun parrain trouvé (vanity/permissions/cache)
         await _send_admin_log(
             guild,
             actor,
@@ -2584,6 +2582,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
