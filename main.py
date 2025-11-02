@@ -2480,8 +2480,8 @@ async def on_member_join(member: discord.Member):
 
         await _send_invite_log(
             guild,
-            f"🌿 {member.mention} s’avance dans le camp, guidé par {inviter.mention}. "
-            f"Son mentor compte désormais **{count}** guerrier(s) qu’il a amené dans le Clan."
+            f"🌿 {member.mention} s’avance dans le camp, guidé par <@{inviter_id}>. "
+            f"Son mentor compte désormais **{total}** guerrier(s) qu’il a amené dans le Clan."
         )
         # Récompense points (une seule fois par invité unique)
         try:
@@ -2708,6 +2708,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
