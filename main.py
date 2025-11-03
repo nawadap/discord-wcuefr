@@ -2349,6 +2349,21 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 # ---------- Sync + Ready ----------
 @bot.event
+async def on_invite_create(invite: discord.Invite):
+    # S’assure que les nouveaux codes sont connus AVANT un join
+    g = invite.guild
+    cache = _invite_cache.setdefault(g.id, {})
+    inviter_id = invite.inviter.id if invite.inviter else 0
+    cache[invite.code] = (invite.uses or 0, inviter_id)
+
+@bot.event
+async def on_invite_delete(invite: discord.Invite):
+    # Retire le code supprimé/épuisé du cache
+    g = invite.guild
+    cache = _invite_cache.setdefault(g.id, {})
+    cache.pop(invite.code, None)
+
+@bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     # Ignore les bots
     if member.bot:
@@ -2530,7 +2545,32 @@ async def on_member_join(member: discord.Member):
         reason = "propagation lente/indétectable"
         if vanity_used:
             reason = "lien vanity probable"
-        await _send_invite_log(guild, f"👋 {member.mention} a rejoint, **invitation non déterminée** ({reason}).")
+    
+        # 🔍 Dernière tentative : on regarde les logs d’audit pour une invite à 1 usage
+        inviter_id = None
+        try:
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.invite_create):
+                inv: discord.Invite = entry.target  # type: ignore
+                if getattr(inv, "max_uses", 0) == 1:
+                    # créé il y a très peu de temps (2 min)
+                    if (datetime.now(timezone.utc) - entry.created_at).total_seconds() < 120:
+                        inviter_id = entry.user.id
+                        break
+        except discord.Forbidden:
+            pass
+    
+        if inviter_id:
+            inviter = guild.get_member(inviter_id)
+            await _send_invite_log(
+                guild,
+                f"👋 {member.mention} a rejoint, invité par {inviter.mention if inviter else 'inconnu'} (détection audit log, 1 usage)."
+            )
+            # ici tu peux aussi ajouter ton incrément de points / quêtes si tu veux
+        else:
+            await _send_invite_log(
+                guild,
+                f"👋 {member.mention} a rejoint, **invitation non déterminée** ({reason})."
+            )
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -2727,6 +2767,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
