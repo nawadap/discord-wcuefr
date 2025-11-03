@@ -362,7 +362,7 @@ def _find_used_invite(before: Dict[str, tuple[int, int]], after: Dict[str, tuple
             return code, inviter_id
     # 2) invite disparue (atteinte max/expirée) mais présente avant => on considère utilisée
     for code, (uses_before, inviter_id) in before.items():
-        if code not in after and uses_before > 0:
+        if code not in after:
             return code, inviter_id
     return None, None
 
@@ -2451,10 +2451,26 @@ async def on_member_join(member: discord.Member):
     guild = member.guild
     # snapshot avant
     before = _invite_cache.get(guild.id, {}).copy()
-    # re-fetch après le join
-    await _refresh_invite_cache(guild)
-    after = _invite_cache.get(guild.id, {})
-    code, inviter_id = _find_used_invite(before, after)
+    # re-fetch après le join — avec retries pour laisser le temps à l’API de propager les uses
+    code = None
+    inviter_id = None
+    for delay in (0.5, 1.5, 3.0):  # 3 tentatives espacées
+        await asyncio.sleep(delay)
+        await _refresh_invite_cache(guild)
+        after = _invite_cache.get(guild.id, {})
+        code, inviter_id = _find_used_invite(before, after)
+        if code:
+            break
+    
+    # Si toujours rien trouvé, on teste le vanity pour affiner le message
+    vanity_used = False
+    if not inviter_id:
+        try:
+            vanity = await guild.vanity_invite()  # None si pas de vanity
+            vanity_used = vanity is not None
+        except discord.Forbidden:
+            pass
+
     if inviter_id:
         total = await _add_invite_for(inviter_id, member.id)
         # Quêtes 'invites' (daily + weekly) pour l'invitant
@@ -2510,8 +2526,11 @@ async def on_member_join(member: discord.Member):
             # on avale l’erreur pour ne pas bloquer l’event
             logging.exception("Invite reward error")
     else:
-        # Cas vanity URL / impossible à déterminer
-        await _send_invite_log(guild, f"👋 {member.mention} a rejoint, **invitation non déterminée** (vanity/permissions manquantes).")
+        # Cas indéterminé : on précise la raison si possible
+        reason = "propagation lente/indétectable"
+        if vanity_used:
+            reason = "lien vanity probable"
+        await _send_invite_log(guild, f"👋 {member.mention} a rejoint, **invitation non déterminée** ({reason}).")
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -2708,6 +2727,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
