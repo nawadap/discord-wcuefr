@@ -1,6 +1,7 @@
 # --- BOT POINTS + BOUTIQUE (SANS VOCAUX) ---
 
 import asyncio, json, logging, os, tempfile, random
+from zoneinfo import ZoneInfo
 from typing import Dict, Tuple, List, Optional
 import discord
 from discord import Intents, app_commands
@@ -378,6 +379,26 @@ async def _send_invite_log(guild: discord.Guild, text: str):
         except Exception:
             pass
 # ---------- Helper ----------
+async def _mark_command_use(guild_id: int, user_id: int, command_str: str):
+    command_norm = command_str.strip().lower()
+    date_key = _today_str()
+    async with _quests_progress_lock:
+        pdb  = _load_quests_progress()
+        qcfg = _load_quests()
+
+        # Assigner l’utilisateur si besoin pour aujourd’hui
+        assigned_daily = _ensure_assignments(pdb, qcfg, "daily", date_key, guild_id, user_id, k=3)
+
+        for qkey, q in qcfg.get("daily", {}).items():
+            if qkey not in assigned_daily:
+                continue
+            if q.get("type") == "command_use" and str(q.get("command","")).strip().lower() == command_norm:
+                slot = _ensure_user_quest_slot(pdb, "daily", date_key, guild_id, user_id, qkey)
+                target = int(q.get("target", 1))
+                slot["progress"] = min(target, int(slot.get("progress", 0)) + 1)
+
+        _save_quests_progress(pdb)
+
 def _get_assigned(progress_db: dict, bucket: str, period_key: str, guild_id: int, user_id: int) -> list[str]:
     return (progress_db
             .setdefault(bucket, {})
@@ -507,7 +528,6 @@ def _ensure_quests_exists():
                         "reward": 10,
                         "desc": "Obtiens au moins une réaction ❤️ d’un modérateur sur un de tes messages."
                     },
-                    
                     "claim_daily_bonus": {
                         "name": "🎁 Réclamer ton bonus quotidien",
                         "type": "command_use",
@@ -515,13 +535,32 @@ def _ensure_quests_exists():
                         "reward": 5,
                         "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier."
                     },
-                    
                     "react_3": {
                         "name": "🔥 Obtenir 3 réactions sur un message",
                         "type": "reaction_total",
                         "target": 3,
                         "reward": 10,
                         "desc": "Fais un message qui récolte au moins 3 réactions."
+                    },
+                    "profile_once": {
+                        "name": "🧾 Ouvrir ton profil",
+                        "type": "command_use",
+                        "command": "/profile",
+                        "target": 1,
+                        "reward": 4,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    },
+                    "night_owl_5": {
+                        "name": "🌙 5 messages entre 22h–2h",
+                        "type": "messages_time_window",
+                        "tz": "Europe/Paris",
+                        "start_hour": 22,
+                        "end_hour": 2,
+                        "target": 5,
+                        "reward": 8,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
                     }
                 },
                 "weekly": {
@@ -570,6 +609,14 @@ def _ensure_quests_exists():
                         "type": "invites",
                         "target": 10,
                         "reward": 80,
+                        "reset": "weekly",
+                        "max_claims_per_reset": 1
+                    },
+                    "daily_claims_5": {
+                        "name": "🏁 Prendre le daily 5 fois",
+                        "type": "daily_claims_week",
+                        "target": 5,
+                        "reward": 20,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     }
@@ -1049,15 +1096,25 @@ async def daily_cmd(interaction: discord.Interaction):
         f"🔥 Streak: **{new_streak}/{STREAK_MAX}** `{streak_bar}` — {next_hint}",
         ephemeral=True
     )
-    # Marquer la quête "claim_daily_bonus" comme faite
+    # Incrémenter la (ou les) quêtes "daily_claims_week"
     async with _quests_progress_lock:
-        pdb = _load_quests_progress()
-        date_key = _today_str()
-        for qkey, q in _load_quests().get("daily", {}).items():
-            if q.get("type") == "command_use":
-                slot = _ensure_user_quest_slot(pdb, "daily", date_key, interaction.guild.id, interaction.user.id, qkey)
-                slot["progress"] = min(q["target"], slot.get("progress", 0) + 1)
+        pdb   = _load_quests_progress()
+        qcfg  = _load_quests()
+        week_key = _week_str()
+        assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key, interaction.guild.id, interaction.user.id, k=3)
+    
+        for qkey, q in qcfg.get("weekly", {}).items():
+            if qkey not in assigned_weekly:
+                continue
+            if q.get("type") == "daily_claims_week":
+                slot   = _ensure_user_quest_slot(pdb, "weekly", week_key, interaction.guild.id, interaction.user.id, qkey)
+                target = int(q.get("target", 5))
+                slot["progress"] = min(target, int(slot.get("progress", 0)) + 1)
+    
         _save_quests_progress(pdb)
+    # Marquer la quête d'usage de commande pour /daily
+    await _mark_command_use(interaction.guild.id, interaction.user.id, "/daily")
+    
 
 @tree.command(name="purchases", description="Voir l'historique d'achats boutique.")
 @guilds_decorator()
@@ -1652,10 +1709,11 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
 
     # Footer
     embed.set_footer(text=f"ID: {target.id}")
-
+    
     # Ephemeral si on regarde son propre profil
     is_self = (target.id == interaction.user.id)
     await interaction.response.send_message(embed=embed, ephemeral=is_self)
+    await _mark_command_use(interaction.guild.id, interaction.user.id, "/profile")
 
 @tree.command(name="topinvites", description="Classement des invitations.")
 @guilds_decorator()
@@ -2943,9 +3001,11 @@ async def on_message(message: discord.Message):
                 if qkey not in assigned_daily:
                     continue
                 qtype = q.get("type")
+            
                 if qtype == "messages":
                     slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, message.author.id, qkey)
                     slot["progress"] = int(slot.get("progress", 0)) + 1
+            
                 elif qtype == "message_exact":
                     wanted = str(q.get("text", "")).strip()
                     if wanted and message.content.strip() == wanted:
@@ -2955,9 +3015,32 @@ async def on_message(message: discord.Message):
                             ch_ok = (int(cid) == message.channel.id)
                         if ch_ok:
                             slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, message.author.id, qkey)
-                            # objectif binaire → on met à 1 max
                             slot["progress"] = min(1, int(slot.get("progress", 0)) + 1)
-        
+            
+                elif qtype == "messages_time_window":
+                    # Fenêtre horaire locale, ex: 22 -> 2 en Europe/Paris
+                    tz_name   = str(q.get("tz", "UTC"))
+                    start_h   = int(q.get("start_hour", 0))
+                    end_h     = int(q.get("end_hour", 0))
+                    target    = int(q.get("target", 1))
+            
+                    # created_at est en UTC (aware) -> converti dans le fuseau demandé
+                    local_dt  = message.created_at.astimezone(ZoneInfo(tz_name))
+                    hour      = local_dt.hour
+            
+                    if start_h == end_h:
+                        in_window = True  # toute la journée (cas limite)
+                    elif start_h < end_h:
+                        # fenêtre simple, ex 10 -> 18
+                        in_window = (start_h <= hour < end_h)
+                    else:
+                        # fenêtre chevauchant minuit, ex 22 -> 2
+                        in_window = (hour >= start_h or hour < end_h)
+            
+                    if in_window:
+                        slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, message.author.id, qkey)
+                        slot["progress"] = min(target, int(slot.get("progress", 0)) + 1)
+
             # WEEKLY
             for qkey, q in qcfg.get("weekly", {}).items():
                 if qkey not in assigned_weekly:
@@ -3095,4 +3178,5 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
