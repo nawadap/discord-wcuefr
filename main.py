@@ -499,6 +499,29 @@ def _ensure_quests_exists():
                         "reward": 20,
                         "reset": "daily",
                         "max_claims_per_reset": 1
+                    },
+                    "react_mod_1": {
+                        "name": "❤️ Gagner une réaction d’un modérateur",
+                        "type": "reaction_mod",
+                        "target": 1,
+                        "reward": 10,
+                        "desc": "Obtiens au moins une réaction ❤️ d’un modérateur sur un de tes messages."
+                    },
+                    
+                    "claim_daily_bonus": {
+                        "name": "🎁 Réclamer ton bonus quotidien",
+                        "type": "command_use",
+                        "target": 1,
+                        "reward": 5,
+                        "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier."
+                    },
+                    
+                    "react_3": {
+                        "name": "🔥 Obtenir 3 réactions sur un message",
+                        "type": "reaction_total",
+                        "target": 3,
+                        "reward": 10,
+                        "desc": "Fais un message qui récolte au moins 3 réactions."
                     }
                 },
                 "weekly": {
@@ -3026,11 +3049,3 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
-
-
-
-
-
-
-
-
