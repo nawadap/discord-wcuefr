@@ -1,7 +1,7 @@
 # --- BOT POINTS + BOUTIQUE (SANS VOCAUX) ---
 
-import asyncio, json, logging, os, tempfile
-from typing import Dict, Tuple, List
+import asyncio, json, logging, os, tempfile, random
+from typing import Dict, Tuple, List, Optional
 import discord
 from discord import Intents, app_commands
 from discord.ext import commands
@@ -378,6 +378,31 @@ async def _send_invite_log(guild: discord.Guild, text: str):
         except Exception:
             pass
 # ---------- Helper ----------
+def _get_assigned(progress_db: dict, bucket: str, period_key: str, guild_id: int, user_id: int) -> list[str]:
+    return (progress_db
+            .setdefault(bucket, {})
+            .setdefault(period_key, {})
+            .setdefault(str(guild_id), {})
+            .setdefault(str(user_id), {})
+            .setdefault("__assigned", []))
+
+def _ensure_assignments(progress_db: dict, qcfg: dict, bucket: str, period_key: str,
+                        guild_id: int, user_id: int, k: int = 3) -> list[str]:
+    assigned = _get_assigned(progress_db, bucket, period_key, guild_id, user_id)
+    if assigned:
+        return assigned
+    # pioche parmi les clés disponibles
+    keys = list(qcfg.get(bucket, {}).keys())
+    if not keys:
+        assigned = []
+    else:
+        # pour éviter les doublons d'objectifs (ex: deux invites similaires) on garde tel quel,
+        # c'est volontairement simple : un utilisateur peut avoir 2 "invites" différents.
+        assigned = random.sample(keys, min(k, len(keys)))
+    # on persist
+    (progress_db[bucket][period_key][str(guild_id)][str(user_id)])["__assigned"] = assigned
+    return assigned
+                            
 def tier_info(member: discord.Member) -> tuple[str | None, str | None, list[str]]:
     """
     Retourne (tier_key, tier_label, perks_list)
@@ -426,7 +451,7 @@ def _ensure_quests_exists():
                 "daily": {
                     "voice_30min": {
                         "name": "🔊 30 min en vocal (daily)",
-                        "type": "voice_minutes",          # messages | voice_minutes | invites
+                        "type": "voice_minutes",
                         "target": 30,
                         "reward": 5,
                         "reset": "daily",
@@ -434,7 +459,7 @@ def _ensure_quests_exists():
                     },
                     "messages_20": {
                         "name": "✉️ 20 messages (daily)",
-                        "type": "messages",          # messages | voice_minutes | invites
+                        "type": "messages",
                         "target": 20,
                         "reward": 5,
                         "reset": "daily",
@@ -442,9 +467,38 @@ def _ensure_quests_exists():
                     },
                     "invite_1": {
                         "name": "🤝 Inviter 1 membre",
-                        "type": "invites",          # messages | voice_minutes | invites
+                        "type": "invites",
                         "target": 1,
                         "reward": 5,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    },
+            
+                    # ✅ NOUVELLES DAILY
+                    "say_meow": {
+                        "name": "😺 Écrire MEOW dans le salon #1431387258065391748",
+                        "type": "message_exact",
+                        "text": "MEOW",
+                        "channel_id": 1431387258065391748,
+                        "target": 1,
+                        "reward": 5,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    },
+                    "coucou_user": {
+                        "name": "👋 Dire « Coucou <@1227330764321067039> »",
+                        "type": "message_exact",
+                        "text": "Coucou <@1227330764321067039>",
+                        "target": 1,
+                        "reward": 5,
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
+                    },
+                    "invite_2": {
+                        "name": "🤝 Inviter 2 membres (daily)",
+                        "type": "invites",
+                        "target": 2,
+                        "reward": 6,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     }
@@ -471,6 +525,32 @@ def _ensure_quests_exists():
                         "type": "invites",
                         "target": 3,
                         "reward": 20,
+                        "reset": "weekly",
+                        "max_claims_per_reset": 1
+                    },
+            
+                    # ✅ NOUVELLES WEEKLY
+                    "weekly_complete_10": {
+                        "name": "🏁 Compléter 10 quêtes (hebdo)",
+                        "type": "quests_completed",
+                        "target": 10,
+                        "reward": 25,
+                        "reset": "weekly",
+                        "max_claims_per_reset": 1
+                    },
+                    "invites_5": {
+                        "name": "🤝 5 invitations (hebdo)",
+                        "type": "invites",
+                        "target": 5,
+                        "reward": 25,
+                        "reset": "weekly",
+                        "max_claims_per_reset": 1
+                    },
+                    "invites_10": {
+                        "name": "🤝 10 invitations (hebdo)",
+                        "type": "invites",
+                        "target": 10,
+                        "reward": 40,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     }
@@ -632,6 +712,98 @@ STREAK_REWARDS = {1: 2, 2: 3, 3: 4, 4: 5}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
+# === [/quests_preview] — Aperçu ADMIN des quêtes d'un membre (affichage seulement) ===
+from typing import Optional
+from discord import app_commands
+
+@tree.command(name="quests_preview", description="(Admin) Aperçu des quêtes d'un membre (affichage seulement)")
+@guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(membre="Le membre à prévisualiser (défaut : toi)")
+async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[discord.Member] = None):
+    await interaction.response.defer(ephemeral=True)
+
+    target: discord.Member = membre or (interaction.user if isinstance(interaction.user, discord.Member) else None)  # type: ignore
+    if not target or not isinstance(target, discord.Member):
+        await interaction.followup.send("Impossible d’identifier le membre cible.", ephemeral=True)
+        return
+
+    date_key = _today_str()
+    week_key = _week_str()
+    qcfg     = _load_quests()
+
+    # Bonus multiplicateur/tier du MEMBRE ciblé (pour simuler son affichage réel)
+    user_mul = points_multiplier_for(target)
+    tier_key, tier_label, _ = tier_info(target)
+
+    # --- helpers locaux de rendu (copie allégée de /quests) ---
+    def _render_section(title: str, cfg_map: dict, user_map: dict, user_mul: float) -> str:
+        lines = [f"__**{title}**__"]
+        for key, q in cfg_map.items():
+            name    = q.get("name", key)
+            target  = int(q.get("target", 0))
+            reward  = int(q.get("reward", 0))
+            slot    = user_map.get(key, {"progress": 0, "claimed": 0})
+            prog    = int(slot.get("progress", 0))
+            claimed = int(slot.get("claimed", 0))
+            maxc    = int(q.get("max_claims_per_reset", 1))
+
+            # Barre
+            done = min(prog, target)
+            fill = int((done / max(1, target)) * 20) if target > 0 else (20 if claimed < maxc and prog >= target else 0)
+            bar  = "█" * fill + "—" * (20 - fill)
+
+            # Statut
+            if claimed >= maxc:
+                status = "✅ réclamée"
+            elif prog >= target:
+                status = "🎁 prête"
+            else:
+                status = "⏳ en cours"
+
+            reward_txt = f"+{reward} pts"
+            if user_mul > 1.0:
+                est = int(round(reward * user_mul))
+                reward_txt += f" *(≈ **+{est}** avec bonus)*"
+
+            lines.append(f"**{name}** — {reward_txt}\n`{bar}` {min(prog,target)}/{target} • {status}")
+        return "\n".join(lines)
+
+    def _make_embed(d_map: dict, w_map: dict) -> discord.Embed:
+        desc = (
+            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily",  {}), d_map, user_mul) + "\n\n" +
+            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, user_mul)
+        )
+        embed = discord.Embed(title=f"Quêtes de {target.display_name}", description=desc, color=discord.Color.blurple())
+        if tier_label:
+            embed.set_footer(text=f"Bonus actif: {tier_label}")
+        return embed
+
+    # Vue (affichage-only : pas de bouton "Réclamer")
+    class PreviewView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+            btn_refresh = discord.ui.Button(emoji="🔄", style=discord.ButtonStyle.secondary)
+            self.add_item(btn_refresh)
+
+            async def ref_cb(i: discord.Interaction):
+                async with _quests_progress_lock:
+                    pdb2   = _load_quests_progress()
+                    d_map2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, target.id)   # type: ignore
+                    w_map2 = _get_user_all_quests(pdb2, "weekly", week_key,  i.guild.id, target.id)   # type: ignore
+                await i.response.edit_message(embed=_make_embed(d_map2, w_map2), view=self)
+
+            btn_refresh.callback = ref_cb  # type: ignore
+
+    # Charge la progression du MEMBRE ciblé et affiche
+    async with _quests_progress_lock:
+        pdb   = _load_quests_progress()
+        d_map = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, target.id)  # type: ignore
+        w_map = _get_user_all_quests(pdb, "weekly", week_key,  interaction.guild.id, target.id)  # type: ignore
+
+    await interaction.followup.send(embed=_make_embed(d_map, w_map), view=PreviewView(), ephemeral=True)
+
 @tree.command(name="quests", description="Voir les quêtes quotidiennes et hebdomadaires, et réclamer les récompenses.")
 @guilds_decorator()
 async def quests_cmd(interaction: discord.Interaction):
@@ -650,9 +822,15 @@ async def quests_cmd(interaction: discord.Interaction):
 
     async with _quests_progress_lock:
         pdb = _load_quests_progress()
-        daily_map  = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, interaction.user.id)  # type: ignore
-        weekly_map = _get_user_all_quests(pdb, "weekly", week_key, interaction.guild.id, interaction.user.id)  # type: ignore
-
+        # ⚠️ on s’assure que l’utilisateur a bien un tirage actif
+        assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, interaction.guild.id, interaction.user.id, k=3)
+        assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  interaction.guild.id, interaction.user.id, k=3)
+        _save_quests_progress(pdb)
+        
+    qcfg_display = {
+        "daily":  {k:v for k,v in qcfg.get("daily",  {}).items() if k in assigned_daily},
+        "weekly": {k:v for k,v in qcfg.get("weekly", {}).items() if k in assigned_weekly},
+    }
     # --- Rendu sections (ajout de user_mul)
     def _render_section(title: str, qcat: dict, u_map: dict, mul: float) -> str:
         if not qcat:
@@ -711,32 +889,53 @@ async def quests_cmd(interaction: discord.Interaction):
             self.add_item(btn_claim); self.add_item(btn_ref)
 
             async def claim_cb(i: discord.Interaction):
+                # … dans claim_cb(...)
                 gained = 0
                 async with _quests_progress_lock:
                     pdb = _load_quests_progress()
-
+                    qcfg = _load_quests()
+                
+                    assigned_daily  = _get_assigned(pdb, "daily",  date_key, i.guild.id, i.user.id)
+                    assigned_weekly = _get_assigned(pdb, "weekly", week_key,  i.guild.id, i.user.id)
+                
+                    u_daily  = _get_user_all_quests(pdb, "daily",  date_key, i.guild.id, i.user.id)
+                    u_weekly = _get_user_all_quests(pdb, "weekly", week_key,  i.guild.id, i.user.id)
+                
+                    claimed_count = 0  # nombre de quêtes réellement réclamées (pour méta)
+                
                     # DAILY
-                    u_daily = _get_user_all_quests(pdb, "daily", date_key, i.guild.id, i.user.id)  # type: ignore
                     for key, q in qcfg.get("daily", {}).items():
+                        if key not in assigned_daily:
+                            continue
                         target = int(q.get("target", 0))
                         reward = int(q.get("reward", 0))
                         maxc   = int(q.get("max_claims_per_reset", 1))
                         slot   = u_daily.setdefault(key, {"progress": 0, "claimed": 0})
-                        if int(slot["progress"]) >= target and int(slot["claimed"]) < maxc:
-                            slot["claimed"] = int(slot["claimed"]) + 1
+                        if slot.get("progress", 0) >= target and slot.get("claimed", 0) < maxc:
+                            slot["claimed"] = int(slot.get("claimed", 0)) + 1
                             gained += reward
-
+                            claimed_count += 1
+                
                     # WEEKLY
-                    u_week = _get_user_all_quests(pdb, "weekly", week_key, i.guild.id, i.user.id)  # type: ignore
                     for key, q in qcfg.get("weekly", {}).items():
+                        if key not in assigned_weekly:
+                            continue
                         target = int(q.get("target", 0))
                         reward = int(q.get("reward", 0))
                         maxc   = int(q.get("max_claims_per_reset", 1))
-                        slot   = u_week.setdefault(key, {"progress": 0, "claimed": 0})
-                        if int(slot["progress"]) >= target and int(slot["claimed"]) < maxc:
-                            slot["claimed"] = int(slot["claimed"]) + 1
+                        slot   = u_weekly.setdefault(key, {"progress": 0, "claimed": 0})
+                        if slot.get("progress", 0) >= target and slot.get("claimed", 0) < maxc:
+                            slot["claimed"] = int(slot.get("claimed", 0)) + 1
                             gained += reward
-
+                            claimed_count += 1
+                
+                    # ➕ Meta-objectif hebdo: quests_completed
+                    # on ajoute 'claimed_count' dans la weekly "quests_completed" SI elle est assignée
+                    for meta_key, meta_q in qcfg.get("weekly", {}).items():
+                        if meta_q.get("type") == "quests_completed" and meta_key in assigned_weekly:
+                            meta_slot = _ensure_user_quest_slot(pdb, "weekly", week_key, i.guild.id, i.user.id, meta_key)
+                            meta_slot["progress"] = int(meta_slot.get("progress", 0)) + claimed_count
+                
                     _save_quests_progress(pdb)
 
                 if gained > 0 and isinstance(i.user, discord.Member):
@@ -2392,16 +2591,23 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     async with _quests_progress_lock:
                         pdb  = _load_quests_progress()
                         qcfg = _load_quests()
+                    
+                        # <-- récupère les quêtes assignées (sets de clés)
+                        assigned_daily  = _ensure_assignments(pdb, "daily",  date_key, guild.id, member.id)
+                        assigned_weekly = _ensure_assignments(pdb, "weekly", week_key, guild.id, member.id)
+                    
                         # DAILY
                         for qkey, q in qcfg.get("daily", {}).items():
-                            if q.get("type") == "voice_minutes":
+                            if q.get("type") == "voice_minutes" and qkey in assigned_daily:
                                 slot = _ensure_user_quest_slot(pdb, "daily", date_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+                    
                         # WEEKLY
                         for qkey, q in qcfg.get("weekly", {}).items():
-                            if q.get("type") == "voice_minutes":
+                            if q.get("type") == "voice_minutes" and qkey in assigned_weekly:
                                 slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
+                    
                         _save_quests_progress(pdb)
 
         # Changement de salon vocal (on clôture + rouvre pour être simple)
@@ -2416,21 +2622,24 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     async with _quests_progress_lock:
                         pdb  = _load_quests_progress()
                         qcfg = _load_quests()
-        
+                    
+                        # <-- récupère les quêtes assignées (sets de clés)
+                        assigned_daily  = _ensure_assignments(pdb, "daily",  date_key, guild.id, member.id)
+                        assigned_weekly = _ensure_assignments(pdb, "weekly", week_key, guild.id, member.id)
+                    
                         # DAILY
                         for qkey, q in qcfg.get("daily", {}).items():
-                            if q.get("type") == "voice_minutes":
+                            if q.get("type") == "voice_minutes" and qkey in assigned_daily:
                                 slot = _ensure_user_quest_slot(pdb, "daily", date_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
-        
+                    
                         # WEEKLY
                         for qkey, q in qcfg.get("weekly", {}).items():
-                            if q.get("type") == "voice_minutes":
+                            if q.get("type") == "voice_minutes" and qkey in assigned_weekly:
                                 slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
-        
+                    
                         _save_quests_progress(pdb)
-        
             # nouvelle session dans le nouveau salon
             _voice_sessions[key] = now
 
@@ -2492,20 +2701,29 @@ async def on_member_join(member: discord.Member):
         try:
             date_key = _today_str()
             week_key = _week_str()
+            # … après avoir trouvé inviter_id …
             async with _quests_progress_lock:
                 pdb  = _load_quests_progress()
                 qcfg = _load_quests()
-                # DAILY
+            
+                date_key = _today_str()
+                week_key = _week_str()
+            
+                assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, member.guild.id, inviter_id, k=3)
+                assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  member.guild.id, inviter_id, k=3)
+            
                 for qkey, q in qcfg.get("daily", {}).items():
-                    if q.get("type") == "invites":
-                        slot = _ensure_user_quest_slot(pdb, "daily", date_key, guild.id, inviter_id, qkey)
+                    if qkey in assigned_daily and q.get("type") == "invites":
+                        slot = _ensure_user_quest_slot(pdb, "daily", date_key, member.guild.id, inviter_id, qkey)
                         slot["progress"] = int(slot.get("progress", 0)) + 1
-                # WEEKLY
+            
                 for qkey, q in qcfg.get("weekly", {}).items():
-                    if q.get("type") == "invites":
-                        slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, inviter_id, qkey)
+                    if qkey in assigned_weekly and q.get("type") == "invites":
+                        slot = _ensure_user_quest_slot(pdb, "weekly", week_key, member.guild.id, inviter_id, qkey)
                         slot["progress"] = int(slot.get("progress", 0)) + 1
+            
                 _save_quests_progress(pdb)
+
         except Exception:
             logging.exception("Erreur incrément quêtes invites")
 
@@ -2640,20 +2858,56 @@ async def on_message(message: discord.Message):
     if message.guild:
         date_key = _today_str()
         week_key = _week_str()
+        # dans on_message (partie "Quêtes: compter les messages en serveur")
         async with _quests_progress_lock:
             pdb  = _load_quests_progress()
             qcfg = _load_quests()
+        
+            # Assigner si besoin
+            assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, message.guild.id, message.author.id, k=3)
+            assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  message.guild.id, message.author.id, k=3)
+        
             # DAILY
             for qkey, q in qcfg.get("daily", {}).items():
-                if q.get("type") == "messages":
+                if qkey not in assigned_daily:
+                    continue
+                qtype = q.get("type")
+                if qtype == "messages":
                     slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, message.author.id, qkey)
                     slot["progress"] = int(slot.get("progress", 0)) + 1
+                elif qtype == "message_exact":
+                    wanted = str(q.get("text", "")).strip()
+                    if wanted and message.content.strip() == wanted:
+                        ch_ok = True
+                        cid = q.get("channel_id")
+                        if cid:
+                            ch_ok = (int(cid) == message.channel.id)
+                        if ch_ok:
+                            slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, message.author.id, qkey)
+                            # objectif binaire → on met à 1 max
+                            slot["progress"] = min(1, int(slot.get("progress", 0)) + 1)
+        
             # WEEKLY
             for qkey, q in qcfg.get("weekly", {}).items():
-                if q.get("type") == "messages":
+                if qkey not in assigned_weekly:
+                    continue
+                qtype = q.get("type")
+                if qtype == "messages":
                     slot = _ensure_user_quest_slot(pdb, "weekly", week_key, message.guild.id, message.author.id, qkey)
                     slot["progress"] = int(slot.get("progress", 0)) + 1
+                elif qtype == "message_exact":
+                    wanted = str(q.get("text", "")).strip()
+                    if wanted and message.content.strip() == wanted:
+                        ch_ok = True
+                        cid = q.get("channel_id")
+                        if cid:
+                            ch_ok = (int(cid) == message.channel.id)
+                        if ch_ok:
+                            slot = _ensure_user_quest_slot(pdb, "weekly", week_key, message.guild.id, message.author.id, qkey)
+                            slot["progress"] = min(1, int(slot.get("progress", 0)) + 1)
+        
             _save_quests_progress(pdb)
+
 
     # Propager aux autres commandes
     await bot.process_commands(message)
@@ -2685,14 +2939,17 @@ async def quests_midnight_rollover():
                             delta_min = max(0, (now_ts - start) // 60)
                             if delta_min <= 0:
                                 continue
-                            # DAILY -> veille
+                            # DAILY -> veille (last_day)
+                            assigned_daily  = _ensure_assignments(pdb, "daily",  last_day,  guild_id, user_id)
                             for qkey, q in qcfg.get("daily", {}).items():
-                                if q.get("type") == "voice_minutes":
+                                if q.get("type") == "voice_minutes" and qkey in assigned_daily:
                                     slot = _ensure_user_quest_slot(pdb, "daily", last_day, guild_id, user_id, qkey)
                                     slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
-                            # WEEKLY -> semaine de la veille
+                            
+                            # WEEKLY -> semaine de la veille (last_week)
+                            assigned_weekly = _ensure_assignments(pdb, "weekly", last_week, guild_id, user_id)
                             for qkey, q in qcfg.get("weekly", {}).items():
-                                if q.get("type") == "voice_minutes":
+                                if q.get("type") == "voice_minutes" and qkey in assigned_weekly:
                                     slot = _ensure_user_quest_slot(pdb, "weekly", last_week, guild_id, user_id, qkey)
                                     slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
                         _save_quests_progress(pdb)
@@ -2767,3 +3024,4 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
