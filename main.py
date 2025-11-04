@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord.ui import View, Select
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
+from guild_storage import guild_file, read_json, write_json, lock_for
 
 if not logging.getLogger().handlers: 
     logging.basicConfig(
@@ -28,12 +29,13 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN manquant dans .env")
 
 # --- Fichiers de données ---
-POINTS_DB_PATH = os.getenv("POINTS_DB_PATH", "data/points.json")
-SHOP_DB_PATH = os.getenv("SHOP_DB_PATH", "data/shop.json")
-PURCHASES_DB_PATH = os.getenv("PURCHASES_DB_PATH", "data/purchases.json")
-INVITES_DB_PATH = os.getenv("INVITES_DB_PATH", "data/invites.json")
-DAILY_DB_PATH = os.getenv("DAILY_DB_PATH", "data/daily.json")
-INVITE_REWARDS_DB_PATH = os.getenv("INVITE_REWARDS_DB_PATH", "data/invites_rewards.json")
+POINTS = "points.json"
+SHOP = "shop.json"
+PURCHASES = "purchases.json"
+INVITES = "invites.json"
+DAILY = "daily.json"
+INVITE_REWARDS = "invites_rewards.json"
+
 QUESTS_DB_PATH = os.getenv("QUESTS_DB_PATH", "data/quests.json")            
 QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")  
 
@@ -2767,6 +2769,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
