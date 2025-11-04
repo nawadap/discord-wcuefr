@@ -764,8 +764,8 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
 
     def _make_embed(d_map, w_map) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg_display.get("daily", {}),  d_map, user_mul) + "\n\n" +
-            _render_section(f"Hebdomadaire — {week_key}", qcfg_display.get("weekly", {}), w_map, user_mul)
+            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map, user_mul) + "\n\n" +
+            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, user_mul)
         )
         note = ""
         if user_mul > 1.0 and tier_label:
@@ -863,8 +863,8 @@ async def quests_cmd(interaction: discord.Interaction):
     # Compose l'embed (et note sur le bonus)
     def _make_embed(d_map, w_map) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map, user_mul) + "\n\n" +
-            _render_section(f"Hedbdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, user_mul)
+            _render_section(f"Quotidien — {date_key}",  qcfg_display.get("daily", {}),  d_map, user_mul) + "\n\n" +
+            _render_section(f"Hedbdomadaire — {week_key}", qcfg_display.get("weekly", {}), w_map, user_mul)
         )
         note = ""
         if user_mul > 1.0 and tier_label:
@@ -3026,6 +3026,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
