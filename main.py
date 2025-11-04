@@ -8,7 +8,7 @@ from discord import Intents, app_commands
 from discord.ext import commands
 from discord.ui import View, Select
 from dotenv import load_dotenv
-from datetime import datetime, timezone, timedelta2
+from datetime import datetime, timezone, timedelta
 
 if not logging.getLogger().handlers: 
     logging.basicConfig(
@@ -3178,6 +3178,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
