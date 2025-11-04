@@ -8,7 +8,7 @@ from discord import Intents, app_commands
 from discord.ext import commands
 from discord.ui import View, Select
 from dotenv import load_dotenv
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta2
 
 if not logging.getLogger().handlers: 
     logging.basicConfig(
@@ -552,10 +552,10 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "night_owl_5": {
-                        "name": "🌙 5 messages entre 23h–5h",
+                        "name": "🌙 5 messages entre 22h–5h",
                         "type": "messages_time_window",
                         "tz": "Europe/Paris",
-                        "start_hour": 23,
+                        "start_hour": 22,
                         "end_hour": 5,
                         "target": 5,
                         "reward": 8,
@@ -3178,6 +3178,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
