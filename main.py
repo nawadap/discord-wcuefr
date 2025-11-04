@@ -879,7 +879,7 @@ async def quests_cmd(interaction: discord.Interaction):
         embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
         return embed
 
-    embed = _make_embed(daily_map, weekly_map)
+    embed = _make_embed(d_map, w_map)
 
     class QuestsView(OwnedView):
         def __init__(self, author_id: int):
@@ -3024,4 +3024,5 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
