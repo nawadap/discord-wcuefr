@@ -879,7 +879,16 @@ async def quests_cmd(interaction: discord.Interaction):
         embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
         return embed
 
+    date_key = _today_str()
+    week_key = _week_str()
+    async with _quests_progress_lock:
+        pdb   = _load_quests_progress()
+        d_map = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, interaction.user.id)
+        w_map = _get_user_all_quests(pdb, "weekly", week_key,  interaction.guild.id, interaction.user.id)
+    
+    # maintenant ces variables existent :
     embed = _make_embed(d_map, w_map)
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     class QuestsView(OwnedView):
         def __init__(self, author_id: int):
@@ -3024,5 +3033,6 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
