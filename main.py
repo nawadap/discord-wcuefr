@@ -552,11 +552,11 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "night_owl_5": {
-                        "name": "🌙 5 messages entre 22h–2h",
+                        "name": "🌙 5 messages entre 23h–5h",
                         "type": "messages_time_window",
                         "tz": "Europe/Paris",
-                        "start_hour": 22,
-                        "end_hour": 2,
+                        "start_hour": 23,
+                        "end_hour": 5,
                         "target": 5,
                         "reward": 8,
                         "reset": "daily",
@@ -3178,5 +3178,6 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
