@@ -888,7 +888,6 @@ async def quests_cmd(interaction: discord.Interaction):
     
     # maintenant ces variables existent :
     embed = _make_embed(d_map, w_map)
-    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     class QuestsView(OwnedView):
         def __init__(self, author_id: int):
@@ -3033,6 +3032,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
