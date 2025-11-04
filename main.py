@@ -453,7 +453,7 @@ def _ensure_quests_exists():
                         "name": "🔊 30 min en vocal (daily)",
                         "type": "voice_minutes",
                         "target": 30,
-                        "reward": 5,
+                        "reward": 10,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
@@ -469,14 +469,12 @@ def _ensure_quests_exists():
                         "name": "🤝 Inviter 1 membre",
                         "type": "invites",
                         "target": 1,
-                        "reward": 5,
+                        "reward": 10,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
-            
-                    # ✅ NOUVELLES DAILY
                     "say_meow": {
-                        "name": "😺 Écrire MEOW dans le salon #1431387258065391748",
+                        "name": "😺 Écrire MEOW dans le salon <#1431387258065391748>",
                         "type": "message_exact",
                         "text": "MEOW",
                         "channel_id": 1431387258065391748,
@@ -498,7 +496,7 @@ def _ensure_quests_exists():
                         "name": "🤝 Inviter 2 membres (daily)",
                         "type": "invites",
                         "target": 2,
-                        "reward": 6,
+                        "reward": 20,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     }
@@ -524,17 +522,15 @@ def _ensure_quests_exists():
                         "name": "🤝 3 invitations (hebdo)",
                         "type": "invites",
                         "target": 3,
-                        "reward": 20,
+                        "reward": 25,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
-            
-                    # ✅ NOUVELLES WEEKLY
                     "weekly_complete_10": {
                         "name": "🏁 Compléter 10 quêtes (hebdo)",
                         "type": "quests_completed",
                         "target": 10,
-                        "reward": 25,
+                        "reward": 20,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -542,7 +538,7 @@ def _ensure_quests_exists():
                         "name": "🤝 5 invitations (hebdo)",
                         "type": "invites",
                         "target": 5,
-                        "reward": 25,
+                        "reward": 40,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -550,7 +546,7 @@ def _ensure_quests_exists():
                         "name": "🤝 10 invitations (hebdo)",
                         "type": "invites",
                         "target": 10,
-                        "reward": 40,
+                        "reward": 80,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     }
@@ -712,15 +708,11 @@ STREAK_REWARDS = {1: 2, 2: 3, 3: 4, 4: 5}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
-# === [/quests_preview] — Aperçu ADMIN des quêtes d'un membre (affichage seulement) ===
-from typing import Optional
-from discord import app_commands
-
-@tree.command(name="quests_preview", description="(Admin) Aperçu des quêtes d'un membre (affichage seulement)")
+@tree.command(name="quests_preview", description="Aperçu des quêtes d'un membre (admin)")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
-@app_commands.describe(membre="Le membre à prévisualiser (défaut : toi)")
+@app_commands.describe(membre="Le membre à prévisualiser")
 async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[discord.Member] = None):
     await interaction.response.defer(ephemeral=True)
 
@@ -3032,6 +3024,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
