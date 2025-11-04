@@ -1049,6 +1049,15 @@ async def daily_cmd(interaction: discord.Interaction):
         f"🔥 Streak: **{new_streak}/{STREAK_MAX}** `{streak_bar}` — {next_hint}",
         ephemeral=True
     )
+    # Marquer la quête "claim_daily_bonus" comme faite
+    async with _quests_progress_lock:
+        pdb = _load_quests_progress()
+        date_key = _today_str()
+        for qkey, q in _load_quests().get("daily", {}).items():
+            if q.get("type") == "command_use":
+                slot = _ensure_user_quest_slot(pdb, "daily", date_key, interaction.guild.id, interaction.user.id, qkey)
+                slot["progress"] = min(q["target"], slot.get("progress", 0) + 1)
+        _save_quests_progress(pdb)
 
 @tree.command(name="purchases", description="Voir l'historique d'achats boutique.")
 @guilds_decorator()
@@ -2573,6 +2582,43 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 # ---------- Sync + Ready ----------
 @bot.event
+async def on_reaction_add(reaction, user):
+    if user.bot:
+        return
+    message = reaction.message
+    if not message.guild:
+        return
+
+    # Vérifie que l’auteur du message existe
+    author = message.author
+    if author.bot:
+        return
+
+    # Charger les quêtes
+    qcfg = _load_quests()
+    async with _quests_progress_lock:
+        pdb = _load_quests_progress()
+        date_key = _today_str()
+        week_key = _week_str()
+
+        # --- Cas 1 : réaction d’un modérateur
+        if any(r.permissions.administrator or r.permissions.manage_messages for r in user.roles):
+            for qkey, q in qcfg.get("daily", {}).items():
+                if q.get("type") == "reaction_mod":
+                    slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, author.id, qkey)
+                    slot["progress"] = min(q["target"], slot.get("progress", 0) + 1)
+
+        # --- Cas 2 : total de réactions sur un message
+        total_reacts = sum(r.count for r in message.reactions)
+        for qkey, q in qcfg.get("daily", {}).items():
+            if q.get("type") == "reaction_total":
+                if total_reacts >= q["target"]:
+                    slot = _ensure_user_quest_slot(pdb, "daily", date_key, message.guild.id, author.id, qkey)
+                    slot["progress"] = q["target"]
+
+        _save_quests_progress(pdb)
+
+@bot.event
 async def on_invite_create(invite: discord.Invite):
     # S’assure que les nouveaux codes sont connus AVANT un join
     g = invite.guild
@@ -3049,3 +3095,4 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
