@@ -450,7 +450,7 @@ def _ensure_quests_exists():
             json.dump({
                 "daily": {
                     "voice_30min": {
-                        "name": "🔊 30 min en vocal (daily)",
+                        "name": "🔊 30 min en vocal",
                         "type": "voice_minutes",
                         "target": 30,
                         "reward": 10,
@@ -458,7 +458,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "messages_20": {
-                        "name": "✉️ 20 messages (daily)",
+                        "name": "✉️ 20 messages",
                         "type": "messages",
                         "target": 20,
                         "reward": 5,
@@ -493,7 +493,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "invite_2": {
-                        "name": "🤝 Inviter 2 membres (daily)",
+                        "name": "🤝 Inviter 2 membres",
                         "type": "invites",
                         "target": 2,
                         "reward": 20,
@@ -503,7 +503,7 @@ def _ensure_quests_exists():
                 },
                 "weekly": {
                     "voice_500min": {
-                        "name": "🔊 500 min en vocal (hebdo)",
+                        "name": "🔊 500 min en vocal",
                         "type": "voice_minutes",
                         "target": 500,
                         "reward": 20,
@@ -511,7 +511,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "messages_200": {
-                        "name": "✉️ 200 messages (hebdo)",
+                        "name": "✉️ 200 messages",
                         "type": "messages",
                         "target": 200,
                         "reward": 20,
@@ -519,7 +519,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "invites_3": {
-                        "name": "🤝 3 invitations (hebdo)",
+                        "name": "🤝 3 invitations",
                         "type": "invites",
                         "target": 3,
                         "reward": 25,
@@ -527,7 +527,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "weekly_complete_10": {
-                        "name": "🏁 Compléter 10 quêtes (hebdo)",
+                        "name": "🏁 Compléter 10 quêtes",
                         "type": "quests_completed",
                         "target": 10,
                         "reward": 20,
@@ -535,7 +535,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "invites_5": {
-                        "name": "🤝 5 invitations (hebdo)",
+                        "name": "🤝 5 invitations",
                         "type": "invites",
                         "target": 5,
                         "reward": 40,
@@ -543,7 +543,7 @@ def _ensure_quests_exists():
                         "max_claims_per_reset": 1
                     },
                     "invites_10": {
-                        "name": "🤝 10 invitations (hebdo)",
+                        "name": "🤝 10 invitations",
                         "type": "invites",
                         "target": 10,
                         "reward": 80,
@@ -3026,6 +3026,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
