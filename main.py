@@ -762,14 +762,16 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
             lines.append(f"**{name}** — {reward_txt}\n`{bar}` {min(prog,target)}/{target} • {status}")
         return "\n".join(lines)
 
-    def _make_embed(d_map: dict, w_map: dict) -> discord.Embed:
+    def _make_embed(d_map, w_map) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily",  {}), d_map, user_mul) + "\n\n" +
-            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, user_mul)
+            _render_section(f"Quotidien — {date_key}",  qcfg_display.get("daily", {}),  d_map, user_mul) + "\n\n" +
+            _render_section(f"Hebdomadaire — {week_key}", qcfg_display.get("weekly", {}), w_map, user_mul)
         )
-        embed = discord.Embed(title=f"Quêtes de {target.display_name}", description=desc, color=discord.Color.blurple())
-        if tier_label:
-            embed.set_footer(text=f"Bonus actif: {tier_label}")
+        note = ""
+        if user_mul > 1.0 and tier_label:
+            note = f"\n\n*Bonus palier actif : {tier_label} ×{user_mul:.2g} — appliqué **sur la somme totale** au moment de la réclamation.*"
+        embed = discord.Embed(title="🗺️ Quêtes", description=desc + note, color=discord.Color.blurple())
+        embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
         return embed
 
     # Vue (affichage-only : pas de bouton "Réclamer")
@@ -848,7 +850,7 @@ async def quests_cmd(interaction: discord.Interaction):
 
             # --- Affichage bonus estimé (arrondi à l'unité, comme au claim)
             reward_txt = f"**+{reward}** pts"
-            if user_mul > 1.0:
+            if mul > 1.0:
                 est = int(round(reward * user_mul))
                 reward_txt += f" *(≈ **+{est}** avec bonus)*"
 
@@ -3024,6 +3026,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
