@@ -816,6 +816,96 @@ STREAK_REWARDS = {1: 2, 2: 3, 3: 4, 4: 5}
 STREAK_GRACE = 2 * DAILY_COOLDOWN  # 48h
 STREAK_WARNING_BEFORE = 30 * 60  # 30 minutes avant expiration
 
+@tree.command(name="quests_clear", description="(admin) Réinitialiser les quêtes d’un membre")
+@guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    membre="Le membre dont tu veux réinitialiser les quêtes",
+    categorie="daily | weekly | both",
+    historique="Si oui, supprime TOUT l’historique ; sinon, seulement la période en cours."
+)
+@app_commands.choices(
+    categorie=[
+        app_commands.Choice(name="Daily uniquement", value="daily"),
+        app_commands.Choice(name="Weekly uniquement", value="weekly"),
+        app_commands.Choice(name="Daily + Weekly", value="both"),
+    ]
+)
+async def quests_clear_cmd(
+    interaction: discord.Interaction,
+    membre: discord.Member,
+    categorie: app_commands.Choice[str],
+    historique: bool = False
+):
+    await interaction.response.defer(ephemeral=True)
+    guild_id = interaction.guild.id
+    user_id  = membre.id
+    cat = categorie.value  # "daily" | "weekly" | "both"
+
+    def _clear_user_for_period(pdb: dict, bucket: str, period_key: str, guild_id: int, user_id: int) -> int:
+        """Supprime l'entrée utilisateur pour un bucket/période. Retourne 1 si quelque chose a été supprimé, 0 sinon."""
+        bucket_map = pdb.get(bucket, {})
+        period_map = bucket_map.get(period_key, {})
+        guild_map  = period_map.get(str(guild_id), {})
+        if str(user_id) in guild_map:
+            # on supprime l’utilisateur (ce qui supprime aussi "__assigned", progress, claimed, etc.)
+            guild_map.pop(str(user_id), None)
+            # ménage: on retire les niveaux vides pour éviter de gonfler le JSON
+            if not guild_map:
+                period_map.pop(str(guild_id), None)
+            if not period_map:
+                bucket_map.pop(period_key, None)
+            if not bucket_map:
+                pdb[bucket] = {}
+            return 1
+        return 0
+
+    removed = 0
+    date_key = _today_str()
+    week_key = _week_str()
+
+    async with _quests_progress_lock:
+        pdb = _load_quests_progress()
+
+        buckets = []
+        if cat in ("daily", "both"):
+            buckets.append(("daily", date_key))
+        if cat in ("weekly", "both"):
+            buckets.append(("weekly", week_key))
+
+        if historique:
+            # pour chaque bucket, parcourt toutes les périodes existantes et enlève l’utilisateur
+            for bucket_name, _current_key in list(buckets):
+                for period_key in list(pdb.get(bucket_name, {}).keys()):
+                    removed += _clear_user_for_period(pdb, bucket_name, period_key, guild_id, user_id)
+        else:
+            # seulement la période en cours (jour UTC pour daily, semaine ISO pour weekly)
+            for bucket_name, pk in buckets:
+                removed += _clear_user_for_period(pdb, bucket_name, pk, guild_id, user_id)
+
+        _save_quests_progress(pdb)
+
+    # feedback + log admin
+    if removed == 0:
+        msg = "ℹ️ Rien à effacer pour ce membre avec ces paramètres."
+    else:
+        scope = "historique complet" if historique else "période en cours"
+        human_cat = {"daily": "Daily", "weekly": "Weekly", "both": "Daily + Weekly"}[cat]
+        msg = f"✅ Réinitialisé **{human_cat}** de **{membre.display_name}** ({scope})."
+
+    await interaction.followup.send(msg, ephemeral=True)
+
+    await _send_admin_log(
+        interaction.guild,
+        interaction.user,
+        "quests.clear",
+        membre=f"{membre} ({membre.id})",
+        categorie=cat,
+        historique=("oui" if historique else "non"),
+        removed=removed
+    )
+
 @tree.command(name="quests_preview", description="Aperçu des quêtes d'un membre (admin)")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
@@ -3230,6 +3320,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
