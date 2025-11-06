@@ -569,6 +569,7 @@ def _ensure_quests_exists():
                     "claim_daily_bonus": {
                         "name": "🎁 Réclamer ton bonus quotidien",
                         "type": "command_use",
+                        "command": "/daily",
                         "target": 1,
                         "reward": 5,
                         "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier."
@@ -923,14 +924,18 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
     week_key = _week_str()
     qcfg     = _load_quests()
 
-    # Bonus multiplicateur/tier du MEMBRE ciblé (pour simuler son affichage réel)
+    # Bonus multiplicateur/tier du MEMBRE ciblé
     user_mul = points_multiplier_for(target)
     tier_key, tier_label, _ = tier_info(target)
 
-    # --- helpers locaux de rendu (copie allégée de /quests) ---
-    def _render_section(title: str, cfg_map: dict, user_map: dict, user_mul: float) -> str:
+    # --- helpers de rendu (filtrés par assigned) ---
+    def _render_section(title: str, cfg_map: dict, user_map: dict, assigned_keys: set[str], user_mul: float) -> str:
         lines = [f"__**{title}**__"]
-        for key, q in cfg_map.items():
+        shown = 0
+        for key in assigned_keys:
+            q = cfg_map.get(key)
+            if not q:
+                continue
             name    = q.get("name", key)
             target  = int(q.get("target", 0))
             reward  = int(q.get("reward", 0))
@@ -939,12 +944,10 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
             claimed = int(slot.get("claimed", 0))
             maxc    = int(q.get("max_claims_per_reset", 1))
 
-            # Barre
             done = min(prog, target)
             fill = int((done / max(1, target)) * 20) if target > 0 else (20 if claimed < maxc and prog >= target else 0)
             bar  = "█" * fill + "—" * (20 - fill)
 
-            # Statut
             if claimed >= maxc:
                 status = "✅ réclamée"
             elif prog >= target:
@@ -958,21 +961,25 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
                 reward_txt += f" *(≈ **+{est}** avec bonus)*"
 
             lines.append(f"**{name}** — {reward_txt}\n`{bar}` {min(prog,target)}/{target} • {status}")
+            shown += 1
+
+        if shown == 0:
+            lines.append("_Aucune quête assignée._")
         return "\n".join(lines)
 
-    def _make_embed(d_map, w_map) -> discord.Embed:
+    def _make_embed(d_map, w_map, assigned_daily: set[str], assigned_weekly: set[str]) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map, user_mul) + "\n\n" +
-            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, user_mul)
+            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map, assigned_daily, user_mul) + "\n\n" +
+            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, assigned_weekly, user_mul)
         )
         note = ""
         if user_mul > 1.0 and tier_label:
             note = f"\n\n*Bonus palier actif : {tier_label} ×{user_mul:.2g} — appliqué **sur la somme totale** au moment de la réclamation.*"
-        embed = discord.Embed(title="🗺️ Quêtes", description=desc + note, color=discord.Color.blurple())
+        embed = discord.Embed(title="🗺️ Quêtes (assignées)", description=desc + note, color=discord.Color.blurple())
         embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
         return embed
 
-    # Vue (affichage-only : pas de bouton "Réclamer")
+    # Vue (affichage-only)
     class PreviewView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=60)
@@ -984,17 +991,22 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
                     pdb2   = _load_quests_progress()
                     d_map2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, target.id)   # type: ignore
                     w_map2 = _get_user_all_quests(pdb2, "weekly", week_key,  i.guild.id, target.id)   # type: ignore
-                await i.response.edit_message(embed=_make_embed(d_map2, w_map2), view=self)
+                    # 👉 Récupère UNIQUEMENT les quêtes assignées au membre
+                    assigned_daily  = set(_get_assigned(pdb2, "daily",  date_key, i.guild.id, target.id))
+                    assigned_weekly = set(_get_assigned(pdb2, "weekly", week_key,  i.guild.id, target.id))
+                await i.response.edit_message(embed=_make_embed(d_map2, w_map2, assigned_daily, assigned_weekly), view=self)
 
             btn_refresh.callback = ref_cb  # type: ignore
 
-    # Charge la progression du MEMBRE ciblé et affiche
+    # Charge la progression + les listes assignées pour le MEMBRE ciblé
     async with _quests_progress_lock:
         pdb   = _load_quests_progress()
         d_map = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, target.id)  # type: ignore
         w_map = _get_user_all_quests(pdb, "weekly", week_key,  interaction.guild.id, target.id)  # type: ignore
+        assigned_daily  = set(_get_assigned(pdb, "daily",  date_key, interaction.guild.id, target.id))
+        assigned_weekly = set(_get_assigned(pdb, "weekly", week_key,  interaction.guild.id, target.id))
 
-    await interaction.followup.send(embed=_make_embed(d_map, w_map), view=PreviewView(), ephemeral=True)
+    await interaction.followup.send(embed=_make_embed(d_map, w_map, assigned_daily, assigned_weekly), view=PreviewView(), ephemeral=True)
 
 @tree.command(name="quests", description="Voir les quêtes quotidiennes et hebdomadaires, et réclamer les récompenses.")
 @guilds_decorator()
@@ -3316,6 +3328,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
