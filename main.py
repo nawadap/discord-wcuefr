@@ -1206,7 +1206,6 @@ async def daily_cmd(interaction: discord.Interaction):
             expire = now_ts + remain
             return await interaction.response.send_message(
                 f"⏳ Tu as déjà pris ton daily. Réessaie dans {joli} ( <t:{expire}:R> ).",
-                ephemeral=True
             )
 
         # Déterminer le nouveau streak :
@@ -1236,7 +1235,6 @@ async def daily_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"🗓️ Daily pris ! **+{reward}** pts → total **{new_total}**.\n"
         f"🔥 Streak: **{new_streak}/{STREAK_MAX}** `{streak_bar}` — {next_hint}",
-        ephemeral=True
     )
     # Incrémenter la (ou les) quêtes "daily_claims_week"
     async with _quests_progress_lock:
@@ -1281,7 +1279,6 @@ async def purchases_cmd(
     if not items:
         return await interaction.response.send_message(
             f"🧾 Aucun achat enregistré pour **{target.display_name}**.",
-            ephemeral=True
         )
 
     # Noms jolis depuis le shop
@@ -1293,7 +1290,7 @@ async def purchases_cmd(
         label = shop.get(key, {}).get("name", key)
         lines.append(f"- {label} (`{key}`) × **{count}**")
 
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+    await interaction.response.send_message("\n".join(lines))
 
 PER_PAGE = 15  # éléments par page
 class InviteListView(discord.ui.View):
@@ -1426,12 +1423,12 @@ async def invites_cmd(interaction: discord.Interaction, membre: discord.Member |
     view = InviteListView(author_id=interaction.user.id, cible=cible, total=total, rows=pretty_rows)
 
     # Envoi initial
-    await interaction.response.send_message(embed=view._make_embed(), view=view, ephemeral=True)
+    await interaction.response.send_message(embed=view._make_embed(), view=view)
 
 @tree.command(name="ping", description="Test rapide de réponse du bot.")
 @guilds_decorator()
 async def ping_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("Pong 🏓", ephemeral=True)
+    await interaction.response.send_message("Pong 🏓")
 
 @tree.command(name="addpoints", description="Ajouter des points à un membre (admin).")
 @guilds_decorator()
@@ -1852,9 +1849,8 @@ async def profile_cmd(interaction: discord.Interaction, membre: discord.Member |
     # Footer
     embed.set_footer(text=f"ID: {target.id}")
     
-    # Ephemeral si on regarde son propre profil
     is_self = (target.id == interaction.user.id)
-    await interaction.response.send_message(embed=embed, ephemeral=is_self)
+    await interaction.response.send_message(embed=embed)
     await _mark_command_use(interaction.guild.id, interaction.user.id, "/profile")
 
 @tree.command(name="topinvites", description="Classement des invitations.")
@@ -3320,6 +3316,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
