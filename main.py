@@ -36,12 +36,13 @@ INVITES_DB_PATH = os.getenv("INVITES_DB_PATH", "data/invites.json")
 DAILY_DB_PATH = os.getenv("DAILY_DB_PATH", "data/daily.json")
 INVITE_REWARDS_DB_PATH = os.getenv("INVITE_REWARDS_DB_PATH", "data/invites_rewards.json")
 QUESTS_DB_PATH = os.getenv("QUESTS_DB_PATH", "data/quests.json")            
-QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")  
+QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")
 
 # --- Salons de logs ---
 SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", "0"))
 ADMIN_LOG_CHANNEL_ID = int(os.getenv("ADMIN_LOG_CHANNEL_ID", "0"))
 INVITE_LOG_CHANNEL_ID = int(os.getenv("INVITE_LOG_CHANNEL_ID", "0"))
+QUEST_LOG_CHANNEL_ID = int(os.getenv("QUEST_LOG_CHANNEL_ID", "0"))
 
 # --- Paramètres ---
 INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "20"))
@@ -85,6 +86,43 @@ def guilds_decorator():
     return app_commands.guilds(*TARGET_GUILDS) if TARGET_GUILDS else (lambda f: f)
 
 # ---------- Logs boutique (salon staff) ----------
+async def _send_quest_log(
+    guild: discord.Guild,
+    user: discord.User | discord.Member,
+    bucket: str,            # 'daily' ou 'weekly'
+    quest_name: str,
+    reward: int,
+    new_total: int
+):
+    if not QUEST_LOG_CHANNEL_ID:
+        return
+    # Récupération du salon
+    channel = guild.get_channel(QUEST_LOG_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await guild.fetch_channel(QUEST_LOG_CHANNEL_ID)  # type: ignore
+        except Exception:
+            return
+
+    # Titre sympa + petit résumé
+    when = datetime.now(timezone.utc)
+    titre_bucket = "Quotidienne" if bucket == "daily" else "Hebdomadaire"
+
+    embed = discord.Embed(
+        title="🏁 Quête terminée",
+        description=f"**{quest_name}**",
+        color=discord.Color.green(),
+        timestamp=when
+    )
+    embed.add_field(name="Type", value=titre_bucket, inline=True)
+    embed.add_field(name="Récompense", value=f"+{reward} pts", inline=True)
+    embed.add_field(name="Total joueur", value=str(new_total), inline=True)
+    embed.set_footer(text=f"ID joueur: {user.id}")
+    try:
+        await channel.send(content=f"{user.mention}", embed=embed)
+    except Exception:
+        pass
+
 async def _send_shop_log(guild: discord.Guild, user: discord.User | discord.Member,
                          item_name: str, cost: int, remaining: int,
                          role_name: str | None = None, note: str = ""):
@@ -961,8 +999,8 @@ async def quests_cmd(interaction: discord.Interaction):
             self.add_item(btn_claim); self.add_item(btn_ref)
 
             async def claim_cb(i: discord.Interaction):
-                # … dans claim_cb(...)
                 gained = 0
+                claimed_infos: list[tuple[str, str, int]] = []
                 async with _quests_progress_lock:
                     pdb = _load_quests_progress()
                     qcfg = _load_quests()
@@ -987,6 +1025,7 @@ async def quests_cmd(interaction: discord.Interaction):
                             slot["claimed"] = int(slot.get("claimed", 0)) + 1
                             gained += reward
                             claimed_count += 1
+                            claimed_infos.append(("daily", q.get("name", key), reward))
                 
                     # WEEKLY
                     for key, q in qcfg.get("weekly", {}).items():
@@ -1000,9 +1039,8 @@ async def quests_cmd(interaction: discord.Interaction):
                             slot["claimed"] = int(slot.get("claimed", 0)) + 1
                             gained += reward
                             claimed_count += 1
-                
-                    # ➕ Meta-objectif hebdo: quests_completed
-                    # on ajoute 'claimed_count' dans la weekly "quests_completed" SI elle est assignée
+                            claimed_infos.append(("weekly", q.get("name", key), reward))
+
                     for meta_key, meta_q in qcfg.get("weekly", {}).items():
                         if meta_q.get("type") == "quests_completed" and meta_key in assigned_weekly:
                             meta_slot = _ensure_user_quest_slot(pdb, "weekly", week_key, i.guild.id, i.user.id, meta_key)
@@ -1013,15 +1051,29 @@ async def quests_cmd(interaction: discord.Interaction):
                 if gained > 0 and isinstance(i.user, discord.Member):
                     gained = int(round(gained * points_multiplier_for(i.user)))
                     new_total = await add_points(i.user.id, gained)
-                    # refresh visuel
+
+                    # Envoi des logs de quêtes réclamées
+                    try:
+                        for bucket, quest_name, reward in claimed_infos:
+                            await _send_quest_log(i.guild, i.user, bucket, quest_name, reward, new_total)
+                    except Exception:
+                        pass
+
+                    # Rafraîchir l’UI
                     async with _quests_progress_lock:
                         pdb2 = _load_quests_progress()
                         d2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, i.user.id)  # type: ignore
-                        w2 = _get_user_all_quests(pdb2, "weekly", week_key, i.guild.id, i.user.id)  # type: ignore
+                        w2 = _get_user_all_quests(pdb2, "weekly", week_key,  i.guild.id, i.user.id)  # type: ignore
                     await i.response.edit_message(embed=_make_embed(d2, w2), view=self)
                     await i.followup.send(f"✅ **+{gained}** pts → total **{new_total}**.", ephemeral=True)
+
                 else:
-                    await i.response.edit_message(embed=embed, view=self)
+                    # Rien à réclamer → il faut recalculer l’embed (sinon 'embed' est undefined)
+                    async with _quests_progress_lock:
+                        pdb2 = _load_quests_progress()
+                        d2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, i.user.id)  # type: ignore
+                        w2 = _get_user_all_quests(pdb2, "weekly", week_key,  i.guild.id, i.user.id)  # type: ignore
+                    await i.response.edit_message(embed=_make_embed(d2, w2), view=self)
                     try:
                         await i.followup.send("Rien à réclamer pour l’instant.", ephemeral=True)
                     except Exception:
@@ -3178,6 +3230,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
