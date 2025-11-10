@@ -680,11 +680,20 @@ def _ensure_quests_exists():
                     "boost_server": {
                       "name": "🚀 Booster le serveur",
                       "type": "server_boost",
-                      "target": 1,  # ✅ il suffit de booster 1 fois
+                      "target": 1,
                       "reward": 300,
                       "reset": "permanent",
                       "max_claims_per_reset": 1,
                       "desc": "Booste le serveur avec Nitro pour montrer ton soutien au Clan !"
+                    },
+                    "actor_tournage": {
+                      "name": "🎬 Participer à un tournage",
+                      "type": "manual_actor", 
+                      "target": 1,
+                      "reward": 200,
+                      "reset": "permanent",
+                      "max_claims_per_reset": 1,
+                      "desc": "Participe à un tournage et obtiens le rôle <@&1432174581547794502> !"
                     }
                 }
             }, f, ensure_ascii=False, indent=2)
@@ -1094,6 +1103,165 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
     await interaction.followup.send(
         embed=_make_embed(d_map, w_map, life_map, assigned_daily, assigned_weekly, assigned_lifetime),
         view=PreviewView(),
+        ephemeral=True,
+    )
+
+@tree.command(
+    name="quests_validate",
+    description="(admin) Valider manuellement une quête pour un membre et lui donner la récompense."
+)
+@guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    quest_id="Identifiant de la quête (ex: voice_30min, invite_1, boost_server...)",
+    membre="Le membre pour lequel valider la quête (par défaut toi)."
+)
+async def quests_validate_cmd(
+    interaction: discord.Interaction,
+    quest_id: str,
+    membre: Optional[discord.Member] = None,
+):
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.followup.send("Cette commande doit être utilisée dans un serveur.", ephemeral=True)
+        return
+
+    target: discord.Member = (
+        membre
+        if membre is not None
+        else (interaction.user if isinstance(interaction.user, discord.Member) else None)  # type: ignore
+    )
+    if target is None:
+        await interaction.followup.send("Impossible d’identifier le membre cible.", ephemeral=True)
+        return
+
+    # --- On retrouve la quête dans la config (daily / weekly / lifetime)
+    qcfg = _load_quests()
+    bucket: str | None = None
+    qdef: dict | None = None
+
+    if quest_id in qcfg.get("daily", {}):
+        bucket = "daily"
+        qdef = qcfg["daily"][quest_id]
+    elif quest_id in qcfg.get("weekly", {}):
+        bucket = "weekly"
+        qdef = qcfg["weekly"][quest_id]
+    elif quest_id in qcfg.get("lifetime", {}):
+        bucket = "lifetime"
+        qdef = qcfg["lifetime"][quest_id]
+
+    if bucket is None or qdef is None:
+        await interaction.followup.send(
+            "❌ Aucune quête trouvée avec cet identifiant. Vérifie `quest_id` (ex: `invite_1`, `messages_20`, `boost_server`...).",
+            ephemeral=True,
+        )
+        return
+
+    # --- Période en fonction du type de quête
+    if bucket == "daily":
+        period_key = _today_str()
+    elif bucket == "weekly":
+        period_key = _week_str()
+    else:  # lifetime
+        period_key = LIFETIME_PERIOD_KEY
+
+    target_base_reward = int(qdef.get("reward", 0))
+    target_amount = int(qdef.get("target", 1))
+    max_claims = int(qdef.get("max_claims_per_reset", 1))
+    qtype = qdef.get("type", "unknown")
+
+    async with _quests_progress_lock:
+        pdb = _load_quests_progress()
+
+        # S'assurer que la quête est bien "assignée" au joueur (pour l’affichage /quests et /quests_preview)
+        assigned_list = _get_assigned(pdb, bucket, period_key, guild.id, target.id)
+        if quest_id not in assigned_list:
+            assigned_list.append(quest_id)
+
+        # Slot de progression
+        slot = _ensure_user_quest_slot(pdb, bucket, period_key, guild.id, target.id, quest_id)
+
+        # Déjà au max de réclamations ?
+        already_claimed = int(slot.get("claimed", 0))
+        if already_claimed >= max_claims:
+            _save_quests_progress(pdb)
+            await interaction.followup.send(
+                f"ℹ️ **{quest_id}** est déjà entièrement réclamée pour {target.mention} sur cette période.",
+                ephemeral=True,
+            )
+            return
+
+        # On force la progression au target : la quête est considérée comme faite
+        slot["progress"] = max(target_amount, int(slot.get("progress", 0)))
+        slot["claimed"] = already_claimed + 1
+
+        # Nombre de quêtes à compter pour la méta “quests_completed”
+        meta_increment = 0
+        if not (bucket == "weekly" and qtype == "quests_completed"):
+            meta_increment = 1
+
+        # Mise à jour des quêtes méta de type "quests_completed" (weekly)
+        if meta_increment > 0:
+            week_key = _week_str()
+            assigned_weekly = _get_assigned(pdb, "weekly", week_key, guild.id, target.id)
+            for meta_key, meta_q in qcfg.get("weekly", {}).items():
+                if meta_q.get("type") == "quests_completed" and meta_key in assigned_weekly:
+                    meta_slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, target.id, meta_key)
+                    meta_slot["progress"] = int(meta_slot.get("progress", 0)) + meta_increment
+
+        _save_quests_progress(pdb)
+
+    # --- Attribution des points (avec multiplicateur de palier)
+    base_reward = target_base_reward
+    effective_reward = base_reward
+    if isinstance(target, discord.Member):
+        effective_reward = int(round(base_reward * points_multiplier_for(target)))
+
+    new_total = await add_points(target.id, effective_reward) if effective_reward > 0 else await add_points(target.id, 0)
+
+    # Log quêtes
+    try:
+        await _send_quest_log(
+            guild,
+            target,
+            bucket,
+            qdef.get("name", quest_id),
+            base_reward,
+            new_total,
+        )
+    except Exception:
+        pass
+
+    # Log admin
+    await _send_admin_log(
+        guild,
+        interaction.user,
+        "quests.validate",
+        membre=f"{target} ({target.id})",
+        quest_id=quest_id,
+        bucket=bucket,
+        reward_base=base_reward,
+        reward_effective=effective_reward,
+        new_total=new_total,
+    )
+
+    # Message de retour
+    bucket_human = {
+        "daily": "quotidienne",
+        "weekly": "hebdomadaire",
+        "lifetime": "à vie",
+    }.get(bucket, bucket)
+
+    bonus_txt = ""
+    if effective_reward != base_reward:
+        bonus_txt = f" (dont bonus palier, total **+{effective_reward}** pts)"
+
+    await interaction.followup.send(
+        f"✅ Quête **{qdef.get('name', quest_id)}** ({bucket_human}) validée pour {target.mention}.\n"
+        f"Récompense de base : **+{base_reward}** pts{bonus_txt} → nouveau total **{new_total}**.",
         ephemeral=True,
     )
 
@@ -3461,6 +3629,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
