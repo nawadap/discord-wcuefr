@@ -528,7 +528,7 @@ def _ensure_quests_exists():
                         "name": "🤝 Inviter 1 membre",
                         "type": "invites",
                         "target": 1,
-                        "reward": 10,
+                        "reward": 50,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
@@ -555,7 +555,7 @@ def _ensure_quests_exists():
                         "name": "🤝 Inviter 2 membres",
                         "type": "invites",
                         "target": 2,
-                        "reward": 20,
+                        "reward": 90,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
@@ -574,6 +574,14 @@ def _ensure_quests_exists():
                         "reward": 5,
                         "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier."
                     },
+                    "bump_server": {
+                        "name": "📢 Faire un bump du serveur",
+                        "type": "command_use",
+                        "command": "/bump",
+                        "target": 1,
+                        "reward": 10,
+                        "desc": "Utilise la commande `/bump` pour promouvoir le serveur sur le site partenaire."
+                    },
                     "react_3": {
                         "name": "🔥 Obtenir 3 réactions sur un message",
                         "type": "reaction_total",
@@ -586,7 +594,7 @@ def _ensure_quests_exists():
                         "type": "command_use",
                         "command": "/profile",
                         "target": 1,
-                        "reward": 4,
+                        "reward": 5,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     },
@@ -597,7 +605,7 @@ def _ensure_quests_exists():
                         "start_hour": 22,
                         "end_hour": 5,
                         "target": 5,
-                        "reward": 8,
+                        "reward": 10,
                         "reset": "daily",
                         "max_claims_per_reset": 1
                     }
@@ -607,7 +615,7 @@ def _ensure_quests_exists():
                         "name": "🔊 500 min en vocal",
                         "type": "voice_minutes",
                         "target": 500,
-                        "reward": 20,
+                        "reward": 30,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -623,7 +631,7 @@ def _ensure_quests_exists():
                         "name": "🤝 3 invitations",
                         "type": "invites",
                         "target": 3,
-                        "reward": 25,
+                        "reward": 140,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -639,7 +647,7 @@ def _ensure_quests_exists():
                         "name": "🤝 5 invitations",
                         "type": "invites",
                         "target": 5,
-                        "reward": 40,
+                        "reward": 350,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -647,7 +655,7 @@ def _ensure_quests_exists():
                         "name": "🤝 10 invitations",
                         "type": "invites",
                         "target": 10,
-                        "reward": 80,
+                        "reward": 650,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -3328,6 +3336,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
