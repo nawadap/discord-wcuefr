@@ -761,7 +761,7 @@ def _save_invite_rewards(data: Dict[str, Dict[str, int]]) -> None:
     _atomic_write(INVITE_REWARDS_DB_PATH, data)
 
 def _load_daily() -> Dict[str, dict]:
-    """{ user_id(str): { 'last': ts(int), 'streak': int } } (compat ancien format int)"""
+    """{ user_id(str): { 'last': ts(int), 'streak': int, 'warned': bool } } (compat ancien format int)"""
     _ensure_daily_exists()
     with open(DAILY_DB_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -769,15 +769,19 @@ def _load_daily() -> Dict[str, dict]:
     data: Dict[str, dict] = {}
     for k, v in raw.items():
         if isinstance(v, dict):
-            last = int(v.get("last", 0))
+            last   = int(v.get("last", 0))
             streak = int(v.get("streak", 0))
+            warned = bool(v.get("warned", False))
         else:
             # Ancien format : juste un timestamp -> on démarre à streak 1 si déjà réclamé
-            last = int(v)
+            last   = int(v)
             streak = 1 if last > 0 else 0
-        data[str(k)] = {"last": last, "streak": streak}
-    return data
+            warned = False  # par défaut
 
+        data[str(k)] = {"last": last, "streak": streak, "warned": warned}
+
+    return data
+    
 def _save_daily(data: Dict[str, dict]) -> None:
     _atomic_write(DAILY_DB_PATH, data)
     
@@ -3336,6 +3340,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
