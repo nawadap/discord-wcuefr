@@ -38,6 +38,7 @@ INVITE_REWARDS_DB_PATH = os.getenv("INVITE_REWARDS_DB_PATH", "data/invites_rewar
 QUESTS_DB_PATH = os.getenv("QUESTS_DB_PATH", "data/quests.json")            
 QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")
 
+LIFETIME_PERIOD_KEY = "permanent"
 # --- Salons de logs ---
 SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", "0"))
 ADMIN_LOG_CHANNEL_ID = int(os.getenv("ADMIN_LOG_CHANNEL_ID", "0"))
@@ -106,7 +107,14 @@ async def _send_quest_log(
 
     # Titre sympa + petit résumé
     when = datetime.now(timezone.utc)
-    titre_bucket = "Quotidienne" if bucket == "daily" else "Hebdomadaire"
+    if bucket == "daily":
+        titre_bucket = "Quotidienne"
+    elif bucket == "weekly":
+        titre_bucket = "Hebdomadaire"
+    elif bucket == "lifetime":
+        titre_bucket = "Permanent"
+    else:
+        titre_bucket = str(bucket)
 
     embed = discord.Embed(
         title="🏁 Quête terminée",
@@ -667,6 +675,17 @@ def _ensure_quests_exists():
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     }
+                },
+                "lifetime": {
+                    "boost_server": {
+                      "name": "🚀 Booster le serveur",
+                      "type": "server_boost",
+                      "target": 1,  # ✅ il suffit de booster 1 fois
+                      "reward": 300,
+                      "reset": "permanent",
+                      "max_claims_per_reset": 1,
+                      "desc": "Booste le serveur avec Nitro pour montrer ton soutien au Clan !"
+                    }
                 }
             }, f, ensure_ascii=False, indent=2)
 
@@ -678,18 +697,19 @@ def _load_quests() -> dict:
 def _ensure_quests_progress_exists():
     if not os.path.exists(QUESTS_PROGRESS_DB_PATH):
         with open(QUESTS_PROGRESS_DB_PATH, "w", encoding="utf-8") as f:
-            # Nouveau format: deux buckets
-            json.dump({"daily": {}, "weekly": {}}, f)
+            # Nouveau format: daily + weekly + lifetime
+            json.dump({"daily": {}, "weekly": {}, "lifetime": {}}, f)
 
 def _load_quests_progress() -> dict:
     _ensure_quests_progress_exists()
     with open(QUESTS_PROGRESS_DB_PATH, "r", encoding="utf-8") as f:
         pdb = json.load(f)
     # rétro-compat: ancien format “plat” -> ranger dans daily
-    if "daily" not in pdb and "weekly" not in pdb:
-        pdb = {"daily": pdb, "weekly": {}}
-    if "daily" not in pdb:  pdb["daily"]  = {}
-    if "weekly" not in pdb: pdb["weekly"] = {}
+    if "daily" not in pdb and "weekly" not in pdb and "lifetime" not in pdb:
+        pdb = {"daily": pdb, "weekly": {}, "lifetime": {}}
+    if "daily" not in pdb:    pdb["daily"]    = {}
+    if "weekly" not in pdb:   pdb["weekly"]   = {}
+    if "lifetime" not in pdb: pdb["lifetime"] = {}
     return pdb
 
 def _save_quests_progress(data: dict):
@@ -707,8 +727,11 @@ def _week_str() -> str:
 def _ensure_user_quest_slot(progress_db: dict, bucket: str, period_key: str,
                             guild_id: int, user_id: int, quest_key: str) -> dict:
     """
-    bucket: 'daily' | 'weekly'
-    period_key: ex: '2025-11-01' (daily) ou '2025-W44' (weekly)
+    bucket: 'daily' | 'weekly' | 'lifetime'
+    period_key:
+      - daily  -> 'YYYY-MM-DD'
+      - weekly -> 'YYYY-Wxx'
+      - lifetime -> LIFETIME_PERIOD_KEY (ex: 'permanent')
     """
     g = (progress_db
          .setdefault(bucket, {})
@@ -979,16 +1002,55 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
             lines.append("_Aucune quête assignée._")
         return "\n".join(lines)
 
-    def _make_embed(d_map, w_map, assigned_daily: set[str], assigned_weekly: set[str]) -> discord.Embed:
+    def _make_embed(
+        d_map,
+        w_map,
+        life_map,
+        assigned_daily: set[str],
+        assigned_weekly: set[str],
+        assigned_lifetime: set[str],
+    ) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg.get("daily", {}),  d_map, assigned_daily, user_mul) + "\n\n" +
-            _render_section(f"Hebdomadaire — {week_key}", qcfg.get("weekly", {}), w_map, assigned_weekly, user_mul)
+            _render_section(
+                f"Quotidien — {date_key}",
+                qcfg.get("daily", {}),
+                d_map,
+                assigned_daily,
+                user_mul,
+            )
+            + "\n\n"
+            + _render_section(
+                f"Hebdomadaire — {week_key}",
+                qcfg.get("weekly", {}),
+                w_map,
+                assigned_weekly,
+                user_mul,
+            )
+            + "\n\n"
+            + _render_section(
+                "Quêtes à vie",
+                qcfg.get("lifetime", {}),
+                life_map,
+                assigned_lifetime,
+                user_mul,
+            )
         )
+
         note = ""
         if user_mul > 1.0 and tier_label:
-            note = f"\n\n*Bonus palier actif : {tier_label} ×{user_mul:.2g} — appliqué **sur la somme totale** au moment de la réclamation.*"
-        embed = discord.Embed(title="🗺️ Quêtes (assignées)", description=desc + note, color=discord.Color.blurple())
-        embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
+            note = (
+                f"\n\n*Bonus palier actif : {tier_label} ×{user_mul:.2g} — "
+                f"appliqué **sur la somme totale** au moment de la réclamation.*"
+            )
+
+        embed = discord.Embed(
+            title="🗺️ Quêtes (assignées + lifetime)",
+            description=desc + note,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(
+            text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC) • Lifetime = permanent."
+        )
         return embed
 
     # Vue (affichage-only)
@@ -1000,25 +1062,40 @@ async def quests_preview_cmd(interaction: discord.Interaction, membre: Optional[
 
             async def ref_cb(i: discord.Interaction):
                 async with _quests_progress_lock:
-                    pdb2   = _load_quests_progress()
-                    d_map2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, target.id)   # type: ignore
-                    w_map2 = _get_user_all_quests(pdb2, "weekly", week_key,  i.guild.id, target.id)   # type: ignore
-                    # 👉 Récupère UNIQUEMENT les quêtes assignées au membre
-                    assigned_daily  = set(_get_assigned(pdb2, "daily",  date_key, i.guild.id, target.id))
-                    assigned_weekly = set(_get_assigned(pdb2, "weekly", week_key,  i.guild.id, target.id))
-                await i.response.edit_message(embed=_make_embed(d_map2, w_map2, assigned_daily, assigned_weekly), view=self)
+                    pdb2    = _load_quests_progress()
+                    d_map2  = _get_user_all_quests(pdb2, "daily",    date_key,            i.guild.id, target.id)   # type: ignore
+                    w_map2  = _get_user_all_quests(pdb2, "weekly",   week_key,            i.guild.id, target.id)   # type: ignore
+                    life2   = _get_user_all_quests(pdb2, "lifetime", LIFETIME_PERIOD_KEY, i.guild.id, target.id)   # type: ignore
+                    # 👉 Récupère UNIQUEMENT les quêtes assignées daily/weekly du membre
+                    assigned_daily    = set(_get_assigned(pdb2, "daily",  date_key, i.guild.id, target.id))
+                    assigned_weekly   = set(_get_assigned(pdb2, "weekly", week_key, i.guild.id, target.id))
+                    # 👉 Lifetime : on affiche toutes les quêtes configurées
+                    assigned_lifetime = set(qcfg.get("lifetime", {}).keys())
+
+                await i.response.edit_message(
+                    embed=_make_embed(d_map2, w_map2, life2, assigned_daily, assigned_weekly, assigned_lifetime),
+                    view=self,
+                )
 
             btn_refresh.callback = ref_cb  # type: ignore
 
     # Charge la progression + les listes assignées pour le MEMBRE ciblé
     async with _quests_progress_lock:
-        pdb   = _load_quests_progress()
-        d_map = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, target.id)  # type: ignore
-        w_map = _get_user_all_quests(pdb, "weekly", week_key,  interaction.guild.id, target.id)  # type: ignore
+        pdb      = _load_quests_progress()
+        d_map    = _get_user_all_quests(pdb, "daily",    date_key,            interaction.guild.id, target.id)  # type: ignore
+        w_map    = _get_user_all_quests(pdb, "weekly",   week_key,            interaction.guild.id, target.id)  # type: ignore
+        life_map = _get_user_all_quests(pdb, "lifetime", LIFETIME_PERIOD_KEY, interaction.guild.id, target.id)  # type: ignore
         assigned_daily  = set(_get_assigned(pdb, "daily",  date_key, interaction.guild.id, target.id))
-        assigned_weekly = set(_get_assigned(pdb, "weekly", week_key,  interaction.guild.id, target.id))
+        assigned_weekly = set(_get_assigned(pdb, "weekly", week_key, interaction.guild.id, target.id))
 
-    await interaction.followup.send(embed=_make_embed(d_map, w_map, assigned_daily, assigned_weekly), view=PreviewView(), ephemeral=True)
+    # Lifetime : toutes les quêtes définies dans la config
+    assigned_lifetime = set(qcfg.get("lifetime", {}).keys())
+
+    await interaction.followup.send(
+        embed=_make_embed(d_map, w_map, life_map, assigned_daily, assigned_weekly, assigned_lifetime),
+        view=PreviewView(),
+        ephemeral=True,
+    )
 
 @tree.command(name="quests", description="Voir les quêtes quotidiennes et hebdomadaires, et réclamer les récompenses.")
 @guilds_decorator()
@@ -1038,15 +1115,17 @@ async def quests_cmd(interaction: discord.Interaction):
 
     async with _quests_progress_lock:
         pdb = _load_quests_progress()
-        # ⚠️ on s’assure que l’utilisateur a bien un tirage actif
+        # ⚠️ on s’assure que l’utilisateur a bien un tirage actif pour daily/weekly
         assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, interaction.guild.id, interaction.user.id, k=3)
         assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  interaction.guild.id, interaction.user.id, k=3)
         _save_quests_progress(pdb)
         
     qcfg_display = {
-        "daily":  {k:v for k,v in qcfg.get("daily",  {}).items() if k in assigned_daily},
-        "weekly": {k:v for k,v in qcfg.get("weekly", {}).items() if k in assigned_weekly},
+        "daily":    {k: v for k, v in qcfg.get("daily", {}).items()  if k in assigned_daily},
+        "weekly":   {k: v for k, v in qcfg.get("weekly", {}).items() if k in assigned_weekly},
+        "lifetime": dict(qcfg.get("lifetime", {})),
     }
+
     # --- Rendu sections (ajout de user_mul)
     def _render_section(title: str, qcat: dict, u_map: dict, mul: float) -> str:
         if not qcat:
@@ -1083,27 +1162,30 @@ async def quests_cmd(interaction: discord.Interaction):
         return "\n".join(lines)
 
     # Compose l'embed (et note sur le bonus)
-    def _make_embed(d_map, w_map) -> discord.Embed:
+    def _make_embed(d_map, w_map, life_map) -> discord.Embed:
         desc = (
-            _render_section(f"Quotidien — {date_key}",  qcfg_display.get("daily", {}),  d_map, user_mul) + "\n\n" +
-            _render_section(f"Hedbdomadaire — {week_key}", qcfg_display.get("weekly", {}), w_map, user_mul)
+            _render_section(f"Quotidien — {date_key}",      qcfg_display.get("daily", {}),    d_map,      user_mul)
+            + "\n\n" +
+            _render_section(f"Hebdomadaire — {week_key}",   qcfg_display.get("weekly", {}),   w_map,      user_mul)
+            + "\n\n" +
+            _render_section("Quêtes à vie",                 qcfg_display.get("lifetime", {}), life_map,   user_mul)
         )
         note = ""
         if user_mul > 1.0 and tier_label:
             note = f"\n\n*Bonus palier actif : {tier_label} ×{user_mul:.2g} — appliqué **sur la somme totale** au moment de la réclamation.*"
         embed = discord.Embed(title="🗺️ Quêtes", description=desc + note, color=discord.Color.blurple())
-        embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC).")
+        embed.set_footer(text="Daily = jour UTC • Weekly = semaine ISO (lun→dim, UTC) • Lifetime = permanent.")
         return embed
 
     date_key = _today_str()
     week_key = _week_str()
     async with _quests_progress_lock:
-        pdb   = _load_quests_progress()
-        d_map = _get_user_all_quests(pdb, "daily",  date_key, interaction.guild.id, interaction.user.id)
-        w_map = _get_user_all_quests(pdb, "weekly", week_key,  interaction.guild.id, interaction.user.id)
+        pdb      = _load_quests_progress()
+        d_map    = _get_user_all_quests(pdb, "daily",    date_key,             interaction.guild.id, interaction.user.id)
+        w_map    = _get_user_all_quests(pdb, "weekly",   week_key,             interaction.guild.id, interaction.user.id)
+        life_map = _get_user_all_quests(pdb, "lifetime", LIFETIME_PERIOD_KEY,  interaction.guild.id, interaction.user.id)
     
-    # maintenant ces variables existent :
-    embed = _make_embed(d_map, w_map)
+    embed = _make_embed(d_map, w_map, life_map)
 
     class QuestsView(OwnedView):
         def __init__(self, author_id: int):
@@ -1155,6 +1237,18 @@ async def quests_cmd(interaction: discord.Interaction):
                             claimed_count += 1
                             claimed_infos.append(("weekly", q.get("name", key), reward))
 
+                    # LIFETIME
+                    for key, q in qcfg.get("lifetime", {}).items():
+                        # Pas d'assignements pour lifetime : toutes les quêtes sont globales
+                        target = int(q.get("target", 1))
+                        reward = int(q.get("reward", 0))
+                        maxc   = int(q.get("max_claims_per_reset", 1))
+                        slot   = _ensure_user_quest_slot(pdb, "lifetime", LIFETIME_PERIOD_KEY, i.guild.id, i.user.id, key)
+                        if slot.get("progress", 0) >= target and slot.get("claimed", 0) < maxc:
+                            slot["claimed"] = int(slot.get("claimed", 0)) + 1
+                            gained += reward
+                            claimed_infos.append(("lifetime", q.get("name", key), reward))
+
                     for meta_key, meta_q in qcfg.get("weekly", {}).items():
                         if meta_q.get("type") == "quests_completed" and meta_key in assigned_weekly:
                             meta_slot = _ensure_user_quest_slot(pdb, "weekly", week_key, i.guild.id, i.user.id, meta_key)
@@ -1175,10 +1269,11 @@ async def quests_cmd(interaction: discord.Interaction):
 
                     # Rafraîchir l’UI
                     async with _quests_progress_lock:
-                        pdb2 = _load_quests_progress()
-                        d2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, i.user.id)  # type: ignore
-                        w2 = _get_user_all_quests(pdb2, "weekly", week_key,  i.guild.id, i.user.id)  # type: ignore
-                    await i.response.edit_message(embed=_make_embed(d2, w2), view=self)
+                        pdb2     = _load_quests_progress()
+                        d2       = _get_user_all_quests(pdb2, "daily",    date_key,            i.guild.id, i.user.id)  # type: ignore
+                        w2       = _get_user_all_quests(pdb2, "weekly",   week_key,            i.guild.id, i.user.id)  # type: ignore
+                        life2    = _get_user_all_quests(pdb2, "lifetime", LIFETIME_PERIOD_KEY, i.guild.id, i.user.id)  # type: ignore
+                    await i.response.edit_message(embed=_make_embed(d2, w2, life2), view=self)
                     await i.followup.send(f"✅ **+{gained}** pts → total **{new_total}**.", ephemeral=True)
 
                 else:
@@ -1195,10 +1290,11 @@ async def quests_cmd(interaction: discord.Interaction):
 
             async def ref_cb(i: discord.Interaction):
                 async with _quests_progress_lock:
-                    pdb2 = _load_quests_progress()
-                    d2 = _get_user_all_quests(pdb2, "daily",  date_key, i.guild.id, i.user.id)  # type: ignore
-                    w2 = _get_user_all_quests(pdb2, "weekly", week_key, i.guild.id, i.user.id)  # type: ignore
-                await i.response.edit_message(embed=_make_embed(d2, w2), view=self)
+                    pdb2  = _load_quests_progress()
+                    d2    = _get_user_all_quests(pdb2, "daily",    date_key,            i.guild.id, i.user.id)  # type: ignore
+                    w2    = _get_user_all_quests(pdb2, "weekly",   week_key,            i.guild.id, i.user.id)  # type: ignore
+                    life2 = _get_user_all_quests(pdb2, "lifetime", LIFETIME_PERIOD_KEY, i.guild.id, i.user.id)  # type: ignore
+                await i.response.edit_message(embed=_make_embed(d2, w2, life2), view=self)
 
             btn_claim.callback = claim_cb
             btn_ref.callback   = ref_cb
@@ -2960,6 +3056,31 @@ async def on_ready():
 @bot.event
 async def on_guild_join(guild: discord.Guild):
     await _refresh_invite_cache(guild)
+    
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """Détecte quand un membre commence à booster le serveur pour la quête lifetime."""
+    try:
+        # Le membre commence à booster ce serveur
+        if before.premium_since is None and after.premium_since is not None:
+            guild = after.guild
+
+            async with _quests_progress_lock:
+                pdb  = _load_quests_progress()
+                qcfg = _load_quests()
+
+                # On marque toutes les quêtes lifetime de type "server_boost" comme faites
+                for qkey, q in qcfg.get("lifetime", {}).items():
+                    if q.get("type") != "server_boost":
+                        continue
+                    slot = _ensure_user_quest_slot(pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, after.id, qkey)
+                    # On met au moins 1 de progression (pour target=1)
+                    slot["progress"] = max(int(slot.get("progress", 0)), 1)
+
+                _save_quests_progress(pdb)
+
+    except Exception:
+        logging.exception("Erreur on_member_update / server_boost quest")
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -3340,6 +3461,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
