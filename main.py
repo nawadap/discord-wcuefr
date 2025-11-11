@@ -3405,7 +3405,13 @@ async def on_message(message: discord.Message):
     # On ignore les messages du bot lui-même
     if message.author.bot:
         return
-
+        # Vérifie si c’est Disboard
+    if message.author.id == 302050872383242240:  # ID du bot Disboard
+        # Exemple de message typique : "Bump effectué par @User !"
+        if "Bump effectué" in message.content:
+            mention = message.mentions[0] if message.mentions else None
+            if mention:
+                await _mark_command_use(message.guild.id, mention.id, "/bump")
     # Si le message vient d’un DM (pas d’un serveur)
     if isinstance(message.channel, discord.DMChannel):
         user = message.author
@@ -3629,6 +3635,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
