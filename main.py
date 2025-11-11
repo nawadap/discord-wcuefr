@@ -267,13 +267,13 @@ def _ensure_shop_exists():
                     "description": "Échange manuel : contacte un admin.",
                     "max_per_user": -1   # illimité
                 },
-                "halloween": {
-                  "name": "🎃 Titre Halloween",
-                  "cost": 20,
-                  "role_id": 1433190078737285231,
-                  "description": "Attribue le rôle saisonnier d'Halloween ! Bouuhh.",
-                  "max_per_user": 1
-                },   
+                # "halloween": {
+                #   "name": "🎃 Titre Halloween",
+                #   "cost": 20,
+                #   "role_id": 1433190078737285231,
+                #   "description": "Attribue le rôle saisonnier d'Halloween ! Bouuhh.",
+                #   "max_per_user": 1
+                # },   
                 "gift100pts": {
                     "name": "🎁 Offrir 100 points à un autre félin",
                     "cost": 150,
@@ -3629,6 +3629,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
