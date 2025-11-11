@@ -575,7 +575,7 @@ def _ensure_quests_exists():
                         "desc": "Obtiens au moins une réaction ❤️ d’un modérateur sur un de tes messages."
                     },
                     "claim_daily_bonus": {
-                        "name": "🎁 Réclamer ton bonus quotidien",
+                        "name": "🎁 Réclamer ton bonus quotidien avec /daily",
                         "type": "command_use",
                         "command": "/daily",
                         "target": 1,
@@ -583,7 +583,7 @@ def _ensure_quests_exists():
                         "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier."
                     },
                     "bump_server": {
-                        "name": "📢 Faire un bump du serveur",
+                        "name": "📢 Faire un /bump du serveur",
                         "type": "command_use",
                         "command": "/bump",
                         "target": 1,
@@ -3635,6 +3635,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
