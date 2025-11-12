@@ -3437,7 +3437,7 @@ async def on_message(message: discord.Message):
             content += " " + (e.description or "") + " " + (e.title or "")
 
         txt = content.lower()
-        if ("bump effectué" in txt) or ("bump done" in txt) or ("bumped this server" in txt):
+        if ("Bump effectué" in txt) or ("bump done" in txt) or ("bot" in txt):
             # Essayer d’identifier l’utilisateur bumpé via la mention, sinon regex
             uid = message.mentions[0].id if message.mentions else None
             if not uid:
@@ -3671,6 +3671,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
