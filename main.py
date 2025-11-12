@@ -3398,19 +3398,34 @@ async def on_member_remove(member: discord.Member):
             inviteur="Non déterminé"
         )
 
+DISBOARD_ID = 302050872383242240  # en haut de ton fichier, près des constantes
+
 @bot.event
 async def on_message(message: discord.Message):
-    # On ignore les messages du bot lui-même
-    if message.author.bot:
+    # Laisser passer Disboard, ignorer les autres bots
+    if message.author.bot and message.author.id != DISBOARD_ID:
         return
-        # Vérifie si c’est Disboard
-    if message.author.id == 302050872383242240:  # ID du bot Disboard
-        # Exemple de message typique : "Bump effectué par @User !"
-        if "Bump effectué" in message.content:
-            mention = message.mentions[0] if message.mentions else None
-            if mention:
-                await _mark_command_use(message.guild.id, mention.id, "/bump")
-    # Si le message vient d’un DM (pas d’un serveur)
+
+    # ① Détection du message de confirmation de Disboard
+    if message.author.id == DISBOARD_ID and message.guild:
+        # Disboard peut envoyer du texte ou un embed selon la langue/config
+        content = (message.content or "")
+        for e in message.embeds:
+            content += " " + (e.description or "") + " " + (e.title or "")
+
+        txt = content.lower()
+        if ("bump effectué" in txt) or ("bump done" in txt) or ("bumped this server" in txt):
+            # Essayer d’identifier l’utilisateur bumpé via la mention, sinon regex
+            uid = message.mentions[0].id if message.mentions else None
+            if not uid:
+                import re
+                m = re.search(r"<@!?(\d+)>", content)
+                if m:
+                    uid = int(m.group(1))
+
+            if uid:
+                await _mark_command_use(message.guild.id, uid, "/bump")
+                
     if isinstance(message.channel, discord.DMChannel):
         user = message.author
         if ADMIN_LOG_CHANNEL_ID:
@@ -3633,4 +3648,5 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
