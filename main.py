@@ -1,5 +1,3 @@
-# --- BOT POINTS + BOUTIQUE (SANS VOCAUX) ---
-
 import asyncio, json, logging, os, tempfile, random
 from zoneinfo import ZoneInfo
 from typing import Dict, Tuple, List, Optional
@@ -3635,19 +3633,3 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
