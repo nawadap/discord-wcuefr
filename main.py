@@ -3146,9 +3146,9 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                         qcfg = _load_quests()
                     
                         # <-- récupère les quêtes assignées (sets de clés)
-                        assigned_daily  = _ensure_assignments(pdb, "daily",  date_key, guild.id, member.id)
-                        assigned_weekly = _ensure_assignments(pdb, "weekly", week_key, guild.id, member.id)
-                    
+                        assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, guild.id, member.id)
+                        assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  guild.id, member.id)
+
                         # DAILY
                         for qkey, q in qcfg.get("daily", {}).items():
                             if q.get("type") == "voice_minutes" and qkey in assigned_daily:
@@ -3177,8 +3177,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                         qcfg = _load_quests()
                     
                         # <-- récupère les quêtes assignées (sets de clés)
-                        assigned_daily  = _ensure_assignments(pdb, "daily",  date_key, guild.id, member.id)
-                        assigned_weekly = _ensure_assignments(pdb, "weekly", week_key, guild.id, member.id)
+                        assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, guild.id, member.id)
+                        assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  guild.id, member.id)
                     
                         # DAILY
                         for qkey, q in qcfg.get("daily", {}).items():
@@ -3633,3 +3633,4 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
