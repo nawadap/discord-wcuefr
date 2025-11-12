@@ -699,22 +699,54 @@ def _ensure_quests_exists():
                 },
                 "lifetime": {
                     "boost_server": {
-                      "name": "🚀 Booster le serveur",
-                      "type": "server_boost",
-                      "target": 1,
-                      "reward": 300,
-                      "reset": "permanent",
-                      "max_claims_per_reset": 1,
-                      "desc": "Booste le serveur avec Nitro pour montrer ton soutien au Clan !"
+                        "name": "🚀 Booster le serveur",
+                        "type": "server_boost",
+                        "target": 1,
+                        "reward": 300,
+                        "reset": "permanent",
+                        "max_claims_per_reset": 1,
+                        "desc": "Booste le serveur avec Nitro pour montrer ton soutien au Clan !"
                     },
                     "actor_tournage": {
-                      "name": "🎬 Participer à un tournage",
-                      "type": "manual_actor", 
-                      "target": 1,
-                      "reward": 200,
-                      "reset": "permanent",
-                      "max_claims_per_reset": 1,
-                      "desc": "Participe à un tournage et obtiens le rôle <@&1432174581547794502> !"
+                        "name": "🎬 Participer à un tournage",
+                        "type": "manual_actor",
+                        "target": 1,
+                        "reward": 200,
+                        "reset": "permanent",
+                        "max_claims_per_reset": 1,
+                        "desc": "Participe à un tournage et obtiens le rôle <@&1432174581547794502> !"
+                    },
+                    "voice_2100min": {
+                        "name": "🔊 2100 min en vocal",
+                        "type": "voice_minutes",
+                        "target": 2100,
+                        "reward": 300,
+                        "reset": "permanent",
+                        "max_claims_per_reset": 1
+                    },
+                    "messages_2000": {
+                        "name": "✉️ 2000 messages",
+                        "type": "messages",
+                        "target": 2000,
+                        "reward": 200,
+                        "reset": "permanent",
+                        "max_claims_per_reset": 1
+                    },
+                    "invites_50": {
+                        "name": "🤝 Inviter 50 membres",
+                        "type": "invites",
+                        "target": 50,
+                        "reward": 800,
+                        "reset": "permanent",
+                        "max_claims_per_reset": 1
+                    },
+                    "quests_100": {
+                        "name": "🏁 Compléter 100 quêtes",
+                        "type": "quests_completed",
+                        "target": 100,
+                        "reward": 400,
+                        "reset": "permanent",
+                        "max_claims_per_reset": 1
                     }
                 }
             }, f, ensure_ascii=False, indent=2)
@@ -3671,6 +3703,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
