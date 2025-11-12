@@ -660,7 +660,7 @@ def _ensure_quests_exists():
                         "name": "🤝 3 invitations",
                         "type": "invites",
                         "target": 3,
-                        "reward": 140,
+                        "reward": 130,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -1265,6 +1265,13 @@ async def quests_validate_cmd(
                     meta_slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, target.id, meta_key)
                     meta_slot["progress"] = int(meta_slot.get("progress", 0)) + meta_increment
 
+            for meta_key, meta_q in qcfg.get("lifetime", {}).items():
+                if meta_q.get("type") == "quests_completed":
+                    meta_slot = _ensure_user_quest_slot(
+                        pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, target.id, meta_key
+                    )
+                    meta_slot["progress"] = int(meta_slot.get("progress", 0)) + meta_increment
+
         _save_quests_progress(pdb)
 
     # --- Attribution des points (avec multiplicateur de palier)
@@ -1474,7 +1481,14 @@ async def quests_cmd(interaction: discord.Interaction):
                         if meta_q.get("type") == "quests_completed" and meta_key in assigned_weekly:
                             meta_slot = _ensure_user_quest_slot(pdb, "weekly", week_key, i.guild.id, i.user.id, meta_key)
                             meta_slot["progress"] = int(meta_slot.get("progress", 0)) + claimed_count
-                
+                    
+                    for meta_key, meta_q in qcfg.get("lifetime", {}).items():
+                        if meta_q.get("type") == "quests_completed":
+                            meta_slot = _ensure_user_quest_slot(
+                                pdb, "lifetime", LIFETIME_PERIOD_KEY, i.guild.id, i.user.id, meta_key
+                            )
+                            meta_slot["progress"] = int(meta_slot.get("progress", 0)) + claimed_count
+
                     _save_quests_progress(pdb)
 
                 if gained > 0 and isinstance(i.user, discord.Member):
@@ -3199,7 +3213,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     async with _quests_progress_lock:
                         pdb  = _load_quests_progress()
                         qcfg = _load_quests()
-                    
+                        
                         # <-- récupère les quêtes assignées (sets de clés)
                         assigned_daily  = _ensure_assignments(pdb, qcfg, "daily",  date_key, guild.id, member.id)
                         assigned_weekly = _ensure_assignments(pdb, qcfg, "weekly", week_key,  guild.id, member.id)
@@ -3216,6 +3230,15 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                                 slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
                     
+                        # ✅ Lifetime: voice_minutes
+                        for qkey, q in qcfg.get("lifetime", {}).items():
+                            if q.get("type") == "voice_minutes":
+                                slot = _ensure_user_quest_slot(
+                                    pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, member.id, qkey
+                                )
+                                target = int(q.get("target", 0))
+                                slot["progress"] = min(target, int(slot.get("progress", 0)) + minutes)
+                                
                         _save_quests_progress(pdb)
 
         # Changement de salon vocal (on clôture + rouvre pour être simple)
@@ -3246,7 +3269,16 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                             if q.get("type") == "voice_minutes" and qkey in assigned_weekly:
                                 slot = _ensure_user_quest_slot(pdb, "weekly", week_key, guild.id, member.id, qkey)
                                 slot["progress"] = int(slot.get("progress", 0)) + int(delta_min)
-                    
+
+                         # ✅ Lifetime: voice_minutes
+                        for qkey, q in qcfg.get("lifetime", {}).items():
+                            if q.get("type") == "voice_minutes":
+                                slot = _ensure_user_quest_slot(
+                                    pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, member.id, qkey
+                                )
+                                target = int(q.get("target", 0))
+                                slot["progress"] = min(target, int(slot.get("progress", 0)) + minutes)
+                                
                         _save_quests_progress(pdb)
             # nouvelle session dans le nouveau salon
             _voice_sessions[key] = now
@@ -3354,7 +3386,16 @@ async def on_member_join(member: discord.Member):
                     if qkey in assigned_weekly and q.get("type") == "invites":
                         slot = _ensure_user_quest_slot(pdb, "weekly", week_key, member.guild.id, inviter_id, qkey)
                         slot["progress"] = int(slot.get("progress", 0)) + 1
-            
+                
+                # ✅ Lifetime: invites
+                for qkey, q in qcfg.get("lifetime", {}).items():
+                    if q.get("type") == "invites":
+                        slot = _ensure_user_quest_slot(
+                            pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, inviter_id, qkey
+                        )
+                        target = int(q.get("target", 0))
+                        slot["progress"] = min(target, int(slot.get("progress", 0)) + 1)
+                        
                 _save_quests_progress(pdb)
 
         except Exception:
@@ -3584,7 +3625,16 @@ async def on_message(message: discord.Message):
                         if ch_ok:
                             slot = _ensure_user_quest_slot(pdb, "weekly", week_key, message.guild.id, message.author.id, qkey)
                             slot["progress"] = min(1, int(slot.get("progress", 0)) + 1)
-        
+
+            # ✅ Lifetime: messages
+            for qkey, q in qcfg.get("lifetime", {}).items():
+                if q.get("type") == "messages":
+                    slot = _ensure_user_quest_slot(
+                        pdb, "lifetime", LIFETIME_PERIOD_KEY, message.guild.id, message.author.id, qkey
+                    )
+                    target = int(q.get("target", 0))
+                    slot["progress"] = min(target, int(slot.get("progress", 0)) + 1)
+
             _save_quests_progress(pdb)
 
 
@@ -3703,6 +3753,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
