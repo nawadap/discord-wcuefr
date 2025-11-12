@@ -115,6 +115,17 @@ async def _send_quest_log(
     else:
         titre_bucket = str(bucket)
 
+    reward_txt = f"+{reward} pts"
+    try:
+        if isinstance(user, discord.Member):
+            mul = points_multiplier_for(user)  # tient déjà compte du cap POINTS_BONUS_CAP
+            if mul > 1.0:
+                est = int(round(reward * mul))
+                if est != reward:
+                    reward_txt += f" *(≈ **+{est}** avec bonus)*"
+    except Exception:
+        pass  # en cas d'imprévu, on retombe sur l'affichage de base
+
     embed = discord.Embed(
         title="🏁 Quête terminée",
         description=f"**{quest_name}**",
@@ -122,9 +133,20 @@ async def _send_quest_log(
         timestamp=when
     )
     embed.add_field(name="Type", value=titre_bucket, inline=True)
-    embed.add_field(name="Récompense", value=f"+{reward} pts", inline=True)
+    embed.add_field(name="Récompense", value=reward_txt, inline=True)
     embed.add_field(name="Total joueur", value=str(new_total), inline=True)
-    embed.set_footer(text=f"ID joueur: {user.id}")
+    try:
+        if isinstance(user, discord.Member):
+            tkey, tlabel, _ = tier_info(user)
+            if tlabel:
+                embed.set_footer(text=f"ID joueur: {user.id} • Bonus: {tlabel} ×{points_multiplier_for(user):.2g}")
+            else:
+                embed.set_footer(text=f"ID joueur: {user.id}")
+        else:
+            embed.set_footer(text=f"ID joueur: {user.id}")
+    except Exception:
+        embed.set_footer(text=f"ID joueur: {user.id}")
+
     try:
         await channel.send(content=f"{user.mention}", embed=embed)
     except Exception:
@@ -3649,6 +3671,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
