@@ -593,7 +593,9 @@ def _ensure_quests_exists():
                         "type": "reaction_mod",
                         "target": 1,
                         "reward": 10,
-                        "desc": "Obtiens au moins une réaction ❤️ d’un modérateur sur un de tes messages."
+                        "desc": "Obtiens au moins une réaction ❤️ d’un modérateur sur un de tes messages.",
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
                     },
                     "claim_daily_bonus": {
                         "name": "🎁 Réclamer ton bonus quotidien avec /daily",
@@ -601,22 +603,28 @@ def _ensure_quests_exists():
                         "command": "/daily",
                         "target": 1,
                         "reward": 5,
-                        "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier."
+                        "desc": "Utilise la commande `/daily` pour récupérer ton bonus journalier.",
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
                     },
                     "bump_server": {
-                        "name": "📢 Faire un /bump du serveur",
+                        "name": "📢 Faire un /bump du serveur [BUG CONTACT <@329950122840424449>]",
                         "type": "command_use",
                         "command": "/bump",
                         "target": 1,
                         "reward": 10,
-                        "desc": "Utilise la commande `/bump` pour promouvoir le serveur sur le site partenaire."
+                        "desc": "Utilise la commande `/bump` pour promouvoir le serveur sur le site partenaire.",
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
                     },
                     "react_3": {
                         "name": "🔥 Obtenir 3 réactions sur un message",
                         "type": "reaction_total",
                         "target": 3,
                         "reward": 10,
-                        "desc": "Fais un message qui récolte au moins 3 réactions."
+                        "desc": "Fais un message qui récolte au moins 3 réactions.",
+                        "reset": "daily",
+                        "max_claims_per_reset": 1
                     },
                     "profile_once": {
                         "name": "🧾 Ouvrir ton profil",
@@ -644,7 +652,7 @@ def _ensure_quests_exists():
                         "name": "🔊 500 min en vocal",
                         "type": "voice_minutes",
                         "target": 500,
-                        "reward": 30,
+                        "reward": 150,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -652,7 +660,7 @@ def _ensure_quests_exists():
                         "name": "✉️ 200 messages",
                         "type": "messages",
                         "target": 200,
-                        "reward": 20,
+                        "reward": 50,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -668,7 +676,7 @@ def _ensure_quests_exists():
                         "name": "🏁 Compléter 10 quêtes",
                         "type": "quests_completed",
                         "target": 10,
-                        "reward": 20,
+                        "reward": 50,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -676,7 +684,7 @@ def _ensure_quests_exists():
                         "name": "🤝 5 invitations",
                         "type": "invites",
                         "target": 5,
-                        "reward": 350,
+                        "reward": 250,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -684,7 +692,7 @@ def _ensure_quests_exists():
                         "name": "🤝 10 invitations",
                         "type": "invites",
                         "target": 10,
-                        "reward": 650,
+                        "reward": 700,
                         "reset": "weekly",
                         "max_claims_per_reset": 1
                     },
@@ -702,7 +710,7 @@ def _ensure_quests_exists():
                         "name": "🚀 Booster le serveur",
                         "type": "server_boost",
                         "target": 1,
-                        "reward": 300,
+                        "reward": 1000,
                         "reset": "permanent",
                         "max_claims_per_reset": 1,
                         "desc": "Booste le serveur avec Nitro pour montrer ton soutien au Clan !"
@@ -720,7 +728,7 @@ def _ensure_quests_exists():
                         "name": "🔊 2100 min en vocal",
                         "type": "voice_minutes",
                         "target": 2100,
-                        "reward": 300,
+                        "reward": 600,
                         "reset": "permanent",
                         "max_claims_per_reset": 1
                     },
@@ -736,7 +744,7 @@ def _ensure_quests_exists():
                         "name": "🤝 Inviter 50 membres",
                         "type": "invites",
                         "target": 50,
-                        "reward": 800,
+                        "reward": 4500,
                         "reset": "permanent",
                         "max_claims_per_reset": 1
                     },
@@ -3753,6 +3761,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
