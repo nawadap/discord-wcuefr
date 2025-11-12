@@ -42,6 +42,7 @@ SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", "0"))
 ADMIN_LOG_CHANNEL_ID = int(os.getenv("ADMIN_LOG_CHANNEL_ID", "0"))
 INVITE_LOG_CHANNEL_ID = int(os.getenv("INVITE_LOG_CHANNEL_ID", "0"))
 QUEST_LOG_CHANNEL_ID = int(os.getenv("QUEST_LOG_CHANNEL_ID", "0"))
+MESSAGE_LOG_CHANNEL_ID = int(os.getenv("MESSAGE_LOG_CHANNEL_ID", "0"))
 
 # --- Paramètres ---
 INVITE_REWARD_POINTS = int(os.getenv("INVITE_REWARD_POINTS", "20"))
@@ -3428,11 +3429,11 @@ async def on_message(message: discord.Message):
                 
     if isinstance(message.channel, discord.DMChannel):
         user = message.author
-        if ADMIN_LOG_CHANNEL_ID:
-            channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID)
+        if MESSAGE_LOG_CHANNEL_ID:
+            channel = bot.get_channel(MESSAGE_LOG_CHANNEL_ID)
             if channel is None:
                 try:
-                    channel = await bot.fetch_channel(ADMIN_LOG_CHANNEL_ID)
+                    channel = await bot.fetch_channel(MESSAGE_LOG_CHANNEL_ID)
                 except Exception:
                     channel = None
             if channel:
@@ -3648,5 +3649,6 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
