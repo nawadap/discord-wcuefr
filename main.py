@@ -1162,7 +1162,7 @@ AVENT_REWARDS: Dict[int, dict] = {
     11: {"points": 19},
     12: {"points": 20},
     13: {"points": 21},
-    14: {"points": 22},
+    14: {"tickets": 1},
     15: {"tickets": 1},
     16: {"points": 29},
     17: {"points": 30},
@@ -4059,6 +4059,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
