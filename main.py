@@ -35,6 +35,7 @@ DAILY_DB_PATH = os.getenv("DAILY_DB_PATH", "data/daily.json")
 INVITE_REWARDS_DB_PATH = os.getenv("INVITE_REWARDS_DB_PATH", "data/invites_rewards.json")
 QUESTS_DB_PATH = os.getenv("QUESTS_DB_PATH", "data/quests.json")            
 QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")
+AVENT_DB_PATH = os.getenv("AVENT_DB_PATH", "data/avent.json")
 
 LIFETIME_PERIOD_KEY = "permanent"
 # --- Salons de logs ---
@@ -64,6 +65,7 @@ _daily_lock = asyncio.Lock()
 _invite_rewards_lock = asyncio.Lock()
 _quests_lock = asyncio.Lock()
 _quests_progress_lock = asyncio.Lock()
+_avent_lock = asyncio.Lock()
 
 _voice_sessions: dict[tuple[int, int], int] = {}
 # ---------- Intents & client ----------
@@ -830,7 +832,29 @@ def _atomic_write(path: str, data: dict):
     finally:
         try: os.remove(tmp)
         except FileNotFoundError: pass
-            
+
+def _ensure_avent_exists():
+    if not os.path.exists(AVENT_DB_PATH):
+        with open(AVENT_DB_PATH, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+
+def _load_avent() -> Dict[str, dict]:
+    """Structure: { user_id(str): { year(str): [days...] } }"""
+    _ensure_avent_exists()
+    with open(AVENT_DB_PATH, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    # cast propre
+    data: Dict[str, dict] = {}
+    for uid, years in raw.items():
+        years_clean = {}
+        for y, days in years.items():
+            years_clean[str(y)] = sorted(int(d) for d in days)
+        data[str(uid)] = years_clean
+    return data
+
+def _save_avent(data: Dict[str, dict]) -> None:
+    _atomic_write(AVENT_DB_PATH, data)
+
 def _ensure_daily_exists():
     if not os.path.exists(DAILY_DB_PATH):
         with open(DAILY_DB_PATH, "w", encoding="utf-8") as f:
@@ -915,7 +939,189 @@ class OwnedView(discord.ui.View):
         except Exception:
             pass
 
+class AventView(OwnedView):
+    def __init__(self, author_id: int, current_year: int, open_day: int, claimed_days: set[int]):
+        super().__init__(author_id=author_id, timeout=120)
+        self.current_year = current_year
+        self.open_day = open_day
+        self.claimed_days: set[int] = set(claimed_days)
+        self._build_buttons()
+
+    def _build_buttons(self):
+        self.clear_items()
+        for day in range(1, 25):
+            row_idx = (day - 1) // 6  # 4 lignes de 6
+            label = str(day)
+            style = discord.ButtonStyle.secondary
+            disabled = True
+
+            if day in self.claimed_days:
+                label = f"✅ {day}"
+                disabled = True
+            elif day == self.open_day:
+                # Jour actuel → cliquable si pas encore pris
+                style = discord.ButtonStyle.success
+                disabled = False
+
+            btn = discord.ui.Button(label=label, style=style, disabled=disabled, row=row_idx)
+
+            async def callback(i: discord.Interaction, d: int = day):
+                await self.handle_click(i, d)
+
+            btn.callback = callback  # type: ignore
+            self.add_item(btn)
+
+    async def handle_click(self, interaction: discord.Interaction, day: int):
+        # sécurité : seul l’auteur peut cliquer (déjà géré par OwnedView.interaction_check)
+        year_now, month_now, day_now = _avent_today_paris()
+
+        # Vérifie si c'est bien le bon jour côté serveur
+        if (
+            year_now != self.current_year
+            or month_now != 12
+            or day_now != day
+        ):
+            return await interaction.response.send_message("❌ Mauvais jour !", ephemeral=True)
+
+        # (Re)charge et met à jour la base de données
+        async with _avent_lock:
+            adb = _load_avent()
+            u = adb.setdefault(str(interaction.user.id), {})
+            year_key = str(self.current_year)
+            days = set(int(d) for d in u.get(year_key, []))
+
+            if day in days:
+                # déjà ouvert (peut arriver si deux menus ouverts)
+                self.claimed_days = days
+                self._build_buttons()
+                await interaction.response.edit_message(
+                    embed=_avent_make_embed(interaction.user, self.current_year, day_now, self.claimed_days),
+                    view=self,
+                )
+                try:
+                    await interaction.followup.send("Tu as déjà ouvert ce jour !", ephemeral=True)
+                except Exception:
+                    pass
+                return
+
+            # Nouveau jour ouvert
+            days.add(day)
+            u[year_key] = sorted(days)
+            _save_avent(adb)
+            self.claimed_days = days
+
+        # Calcul des points
+        base_reward = int(AVENT_REWARDS.get(day, 10))
+        effective_reward = base_reward
+        if isinstance(interaction.user, discord.Member):
+            effective_reward = int(round(base_reward * points_multiplier_for(interaction.user)))
+
+        new_total = await add_points(interaction.user.id, effective_reward)
+
+        # Comptabiliser l'utilisation de la commande pour les quêtes "command_use"
+        try:
+            if interaction.guild:
+                await _mark_command_use(interaction.guild.id, interaction.user.id, "/avent")
+        except Exception:
+            pass
+
+        # Rafraîchir l'embed + les boutons
+        self.open_day = day
+        self._build_buttons()
+        await interaction.response.edit_message(
+            embed=_avent_make_embed(interaction.user, self.current_year, day_now, self.claimed_days),
+            view=self,
+        )
+
+        # Message de feedback
+        bonus_txt = ""
+        if effective_reward != base_reward:
+            bonus_txt = f" (avec bonus palier, total **+{effective_reward}** pts)"
+
+        try:
+            await interaction.followup.send(
+                f"🎁 Jour {day} ouvert ! Récompense de base: **+{base_reward}** pts{bonus_txt} → nouveau total **{new_total}**.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+
+@tree.command(name="avent", description="Ouvre le calendrier de l'avent (1–24 décembre).")
+@guilds_decorator()
+async def avent_cmd(interaction: discord.Interaction):
+    year, month, day = _avent_today_paris()
+
+    # Disponibilité du calendrier (1 à 24 décembre)
+    if month != 12 or not (1 <= day <= 24):
+        return await interaction.response.send_message(
+            "🎄 Le calendrier de l'avent est disponible **du 1 au 24 décembre** (heure Europe/Paris).",
+            ephemeral=True,
+        )
+
+    # Charge les jours déjà ouverts par l'utilisateur pour cette année
+    async with _avent_lock:
+        adb = _load_avent()
+        u = adb.setdefault(str(interaction.user.id), {})
+        year_key = str(year)
+        claimed_days = set(int(d) for d in u.get(year_key, []))
+        # on ré-enregistre proprement au cas où
+        u[year_key] = sorted(claimed_days)
+        _save_avent(adb)
+
+    embed = _avent_make_embed(interaction.user, year, day, claimed_days)
+    view = AventView(author_id=interaction.user.id, current_year=year, open_day=day, claimed_days=claimed_days)
+
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    try:
+        view.message = await interaction.original_response()
+    except Exception:
+        pass
+
 # --- Streak (récompenses et tolérance) ---
+# ---------- Calendrier de l'avent ----------
+# Points "de base" par jour (avant bonus de palier)
+AVENT_REWARDS: Dict[int, int] = {d: 10 for d in range(1, 24)}
+AVENT_REWARDS[24] = 50  # jour 24 un peu plus généreux :)
+
+def _avent_today_paris() -> tuple[int, int, int]:
+    """Retourne (année, mois, jour) en Europe/Paris."""
+    now = datetime.now(ZoneInfo("Europe/Paris"))
+    return now.year, now.month, now.day
+
+def _avent_make_embed(user: discord.abc.User, year: int, today_day: int, claimed: set[int]) -> discord.Embed:
+    """Petit embed récap pour le calendrier de l'avent."""
+    lignes = []
+    for row in range(4):  # 4 lignes de 6 jours = 24
+        start = row * 6 + 1
+        days = []
+        for d in range(start, start + 6):
+            if d > 24:
+                continue
+            if d in claimed:
+                days.append(f"✅ **{d}**")
+            elif d == today_day:
+                days.append(f"🎁 **{d}**")
+            else:
+                days.append(f"{d}")
+        lignes.append(" • ".join(days))
+
+    desc = "\n".join(lignes)
+    desc += (
+        f"\n\n🎄 **Calendrier de l'avent {year}**\n"
+        f"- Jour actuel (heure de Paris) : **{today_day} décembre**\n"
+        "- Seul le jour actuel est cliquable.\n"
+        "- Un jour déjà ouvert est marqué ✅ et ne peut pas être rouvert."
+    )
+
+    embed = discord.Embed(
+        title="🎅 Calendrier de l'avent",
+        description=desc,
+        color=discord.Color.red(),
+    )
+    embed.set_footer(text="Disponible du 1 au 24 décembre (heure Europe/Paris).")
+    return embed
+
 DAILY_COOLDOWN = 24 * 60 * 60  # 24h
 STREAK_MAX = 4
 STREAK_REWARDS = {1: 2, 2: 3, 3: 4, 4: 5}
@@ -3761,6 +3967,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
