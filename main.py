@@ -978,7 +978,7 @@ class AventView(OwnedView):
         # Vérifie si c'est bien le bon jour côté serveur
         if (
             year_now != self.current_year
-            or month_now != 12
+            or month_now != 11
             or day_now != day
         ):
             return await interaction.response.send_message("❌ Mauvais jour !", ephemeral=True)
@@ -1053,7 +1053,7 @@ async def avent_cmd(interaction: discord.Interaction):
     year, month, day = _avent_today_paris()
 
     # Disponibilité du calendrier (1 à 24 décembre)
-    if month != 12 or not (1 <= day <= 24):
+    if month != 11 or not (1 <= day <= 24):
         return await interaction.response.send_message(
             "🎄 Le calendrier de l'avent est disponible **du 1 au 24 décembre** (heure Europe/Paris).",
             ephemeral=True,
@@ -3967,6 +3967,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
