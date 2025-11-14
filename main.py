@@ -950,7 +950,8 @@ class AventView(OwnedView):
     def _build_buttons(self):
         self.clear_items()
         for day in range(1, 25):
-            row_idx = (day - 1) // 6  # 4 lignes de 6
+            # 👉 5 boutons max par ligne → 5 lignes (0..4) pour 24 jours
+            row_idx = (day - 1) // 5
             label = str(day)
             style = discord.ButtonStyle.secondary
             disabled = True
@@ -970,6 +971,7 @@ class AventView(OwnedView):
 
             btn.callback = callback  # type: ignore
             self.add_item(btn)
+
 
     async def handle_click(self, interaction: discord.Interaction, day: int):
         # sécurité : seul l’auteur peut cliquer (déjà géré par OwnedView.interaction_check)
@@ -1092,10 +1094,10 @@ def _avent_today_paris() -> tuple[int, int, int]:
 def _avent_make_embed(user: discord.abc.User, year: int, today_day: int, claimed: set[int]) -> discord.Embed:
     """Petit embed récap pour le calendrier de l'avent."""
     lignes = []
-    for row in range(4):  # 4 lignes de 6 jours = 24
-        start = row * 6 + 1
+    for row in range(5):  # 5 lignes de 5 jours = 25 max
+        start = row * 5 + 1
         days = []
-        for d in range(start, start + 6):
+        for d in range(start, start + 5):
             if d > 24:
                 continue
             if d in claimed:
@@ -1104,7 +1106,8 @@ def _avent_make_embed(user: discord.abc.User, year: int, today_day: int, claimed
                 days.append(f"🎁 **{d}**")
             else:
                 days.append(f"{d}")
-        lignes.append(" • ".join(days))
+        if days:
+            lignes.append(" • ".join(days))
 
     desc = "\n".join(lignes)
     desc += (
@@ -3967,6 +3970,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
