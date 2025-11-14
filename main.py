@@ -3245,7 +3245,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                                     pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, member.id, qkey
                                 )
                                 target = int(q.get("target", 0))
-                                slot["progress"] = min(target, int(slot.get("progress", 0)) + minutes)
+                                slot["progress"] = min(target, int(slot.get("progress", 0)) + int(delta_min))
                                 
                         _save_quests_progress(pdb)
 
@@ -3285,7 +3285,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                                     pdb, "lifetime", LIFETIME_PERIOD_KEY, guild.id, member.id, qkey
                                 )
                                 target = int(q.get("target", 0))
-                                slot["progress"] = min(target, int(slot.get("progress", 0)) + minutes)
+                                slot["progress"] = min(target, int(slot.get("progress", 0)) + int(delta_min))
                                 
                         _save_quests_progress(pdb)
             # nouvelle session dans le nouveau salon
@@ -3761,6 +3761,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
