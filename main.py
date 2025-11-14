@@ -1013,7 +1013,7 @@ class AventView(OwnedView):
         # Vérifie si c'est bien le bon jour côté serveur
         if (
             year_now != self.current_year
-            or month_now != 11   # ⬅️ tu remettras 12 en prod pour décembre
+            or month_now != 12
             or day_now != day
         ):
             return await interaction.response.send_message("❌ Mauvais jour !", ephemeral=True)
@@ -1138,7 +1138,7 @@ async def avent_cmd(interaction: discord.Interaction):
     year, month, day = _avent_today_paris()
 
     # Disponibilité du calendrier (1 à 24 décembre)
-    if month != 11 or not (1 <= day <= 24):
+    if month != 12 or not (1 <= day <= 24):
         return await interaction.response.send_message(
             "🎄 Le calendrier de l'avent est disponible **du 1 au 24 décembre** (heure Europe/Paris).",
             ephemeral=True,
@@ -3756,14 +3756,24 @@ async def on_member_join(member: discord.Member):
                     # Première fois que ce membre rejoint et crédite un parrain → on récompense
                     inviter = guild.get_member(inviter_id)
                     mul = points_multiplier_for(inviter) if inviter else 1.0
-                    new_total_pts = await add_points(inviter_id, int(round(INVITE_REWARD_POINTS * mul)))
+                
+                    gained_pts = int(round(INVITE_REWARD_POINTS * mul))
+                    new_total_pts = await add_points(inviter_id, gained_pts)
+                
+                    # 🎟️ +1 ticket à chaque premier join crédité
+                    new_total_tickets = await add_tickets(inviter_id, 1)
+                
                     rewarded[mid] = int(inviter_id)
                     _save_invite_rewards(rdb)
-
+                
                     # petit log / feedback côté staff (même salon que les joins si tu veux)
                     await _send_invite_log(
                         guild,
-                        f"🎁 +{int(round(INVITE_REWARD_POINTS * mul))} pts pour <@{inviter_id}> (nouveau total: **{new_total_pts}**) — premier join crédité de {member.mention}."
+                        (
+                            f"🎁 +{gained_pts} pts et 🎟️ +1 ticket pour <@{inviter_id}> "
+                            f"(points: **{new_total_pts}**, tickets: **{new_total_tickets}**) — "
+                            f"premier join crédité de {member.mention}."
+                        )
                     )
                 else:
                     # déjà récompensé par le passé → pas de points
@@ -4092,6 +4102,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
