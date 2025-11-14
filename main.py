@@ -329,6 +329,12 @@ def _ensure_shop_exists():
                     "cost": 150,
                     "description": "Échange manuel : contacte un admin.",
                     "max_per_user": -1    # illimité
+                },
+                "ticket1": {
+                    "name": "🎟️ 1 ticket",
+                    "cost": 50,
+                    "description": "Ajoute 1 ticket à ton compteur (pour les tirages).",
+                    "max_per_user": -1    # illimité
                 }
             }, f, ensure_ascii=False, indent=2)
 
@@ -1114,6 +1120,18 @@ class AventView(OwnedView):
         except Exception:
             pass
 
+@tree.command(name="tickets", description="Voir ton nombre de tickets.")
+@guilds_decorator()
+async def tickets_cmd(interaction: discord.Interaction):
+    # On lit le JSON des tickets
+    async with _tickets_lock:
+        data = _load_tickets()
+        count = int(data.get(str(interaction.user.id), 0))
+
+    texte = f"🎟️ Tu as actuellement **{count}** ticket(s)."
+
+    await interaction.response.send_message(texte, ephemeral=True)
+
 @tree.command(name="avent", description="Ouvre le calendrier de l'avent (1–24 décembre).")
 @guilds_decorator()
 async def avent_cmd(interaction: discord.Interaction):
@@ -1162,7 +1180,7 @@ AVENT_REWARDS: Dict[int, dict] = {
     11: {"points": 19},
     12: {"points": 20},
     13: {"points": 21},
-    14: {"tickets": 1},
+    14: {"points": 22},
     15: {"tickets": 1},
     16: {"points": 29},
     17: {"points": 30},
@@ -2967,18 +2985,33 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
                 role_name=f"#{role_id}", note="Rôle introuvable"
             )
     else:
-        desc = item.get("description", "Contacte un admin pour la remise.")
-        await interaction.response.send_message(
-            f"✅ Tu as acheté **{name}** pour **{cost}** pts.\nℹ️ {desc}",
-            ephemeral=True
-        )
-        await increment_purchase(interaction.user.id, key)
-        await _send_shop_log(
-            interaction.guild, interaction.user, name, cost, remaining,
-            role_name=None, note="Remise manuelle"
-        )
+        # Cas spécial : achat d'un ticket
+        if key == "ticket1":
+            # On ajoute 1 ticket au joueur
+            new_total_tickets = await add_tickets(interaction.user.id, 1)
 
-
+            await interaction.response.send_message(
+                f"✅ Tu as acheté **{name}** pour **{cost}** pts.\n"
+                f"🎟️ Tu gagnes **1 ticket** → tu as maintenant **{new_total_tickets}** tickets.",
+                ephemeral=True
+            )
+            await increment_purchase(interaction.user.id, key)
+            await _send_shop_log(
+                interaction.guild, interaction.user, name, cost, remaining,
+                role_name=None, note=f\"Ticket auto-ajouté (total {new_total_tickets})\"
+            )
+        else:
+            # Comportement classique pour les autres items "manuels"
+            desc = item.get("description", "Contacte un admin pour la remise.")
+            await interaction.response.send_message(
+                f"✅ Tu as acheté **{name}** pour **{cost}** pts.\nℹ️ {desc}",
+                ephemeral=True
+            )
+            await increment_purchase(interaction.user.id, key)
+            await _send_shop_log(
+                interaction.guild, interaction.user, name, cost, remaining,
+                role_name=None, note="Remise manuelle"
+            )
 
 # ---------- /shopadmin : menu interactif (remplace l'ancien groupe) ----------
 @tree.command(name="shopadmin", description="Ouvre le panneau admin de la boutique (admin).")
@@ -4059,6 +4092,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
