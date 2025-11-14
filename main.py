@@ -2998,7 +2998,7 @@ async def _handle_purchase(interaction: discord.Interaction, key: str):
             await increment_purchase(interaction.user.id, key)
             await _send_shop_log(
                 interaction.guild, interaction.user, name, cost, remaining,
-                role_name=None, note=f\"Ticket auto-ajouté (total {new_total_tickets})\"
+                role_name=None, note=f"Ticket auto-ajouté (total {new_total_tickets})"
             )
         else:
             # Comportement classique pour les autres items "manuels"
@@ -4092,6 +4092,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
