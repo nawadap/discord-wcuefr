@@ -1130,7 +1130,7 @@ async def tickets_cmd(interaction: discord.Interaction):
 
     texte = f"🎟️ Tu as actuellement **{count}** ticket(s)."
 
-    await interaction.response.send_message(texte, ephemeral=True)
+    await interaction.response.send_message(texte)
 
 @tree.command(name="avent", description="Ouvre le calendrier de l'avent (1–24 décembre).")
 @guilds_decorator()
@@ -4102,6 +4102,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
