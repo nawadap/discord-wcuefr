@@ -36,6 +36,8 @@ INVITE_REWARDS_DB_PATH = os.getenv("INVITE_REWARDS_DB_PATH", "data/invites_rewar
 QUESTS_DB_PATH = os.getenv("QUESTS_DB_PATH", "data/quests.json")            
 QUESTS_PROGRESS_DB_PATH = os.getenv("QUESTS_PROGRESS_DB_PATH", "data/quests_progress.json")
 AVENT_DB_PATH = os.getenv("AVENT_DB_PATH", "data/avent.json")
+TICKETS_DB_PATH = os.getenv("TICKETS_DB_PATH", "data/tickets.json")
+
 
 LIFETIME_PERIOD_KEY = "permanent"
 # --- Salons de logs ---
@@ -66,6 +68,8 @@ _invite_rewards_lock = asyncio.Lock()
 _quests_lock = asyncio.Lock()
 _quests_progress_lock = asyncio.Lock()
 _avent_lock = asyncio.Lock()
+_tickets_lock = asyncio.Lock()
+
 
 _voice_sessions: dict[tuple[int, int], int] = {}
 # ---------- Intents & client ----------
@@ -224,6 +228,29 @@ async def _send_admin_log(
         pass
 
 # ---------- Points (JSON) ----------
+def _ensure_tickets_exists():
+    if not os.path.exists(TICKETS_DB_PATH):
+        with open(TICKETS_DB_PATH, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+
+def _load_tickets() -> Dict[str, int]:
+    _ensure_tickets_exists()
+    with open(TICKETS_DB_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {str(k): int(v) for k, v in data.items()}
+
+def _save_tickets(data: Dict[str, int]):
+    _atomic_write(TICKETS_DB_PATH, data)
+
+async def add_tickets(user_id: int, amount: int) -> int:
+    """Ajoute N tickets à un joueur."""
+    async with _tickets_lock:
+        data = _load_tickets()
+        new_val = int(data.get(str(user_id), 0)) + amount
+        data[str(user_id)] = new_val
+        _save_tickets(data)
+        return new_val
+
 def _ensure_points_exists():
     if not os.path.exists(POINTS_DB_PATH):
         with open(POINTS_DB_PATH, "w", encoding="utf-8") as f:
@@ -980,7 +1007,7 @@ class AventView(OwnedView):
         # Vérifie si c'est bien le bon jour côté serveur
         if (
             year_now != self.current_year
-            or month_now != 11
+            or month_now != 11   # ⬅️ tu remettras 12 en prod pour décembre
             or day_now != day
         ):
             return await interaction.response.send_message("❌ Mauvais jour !", ephemeral=True)
@@ -997,7 +1024,12 @@ class AventView(OwnedView):
                 self.claimed_days = days
                 self._build_buttons()
                 await interaction.response.edit_message(
-                    embed=_avent_make_embed(interaction.user, self.current_year, day_now, self.claimed_days),
+                    embed=_avent_make_embed(
+                        interaction.user,
+                        self.current_year,
+                        day_now,
+                        self.claimed_days
+                    ),
                     view=self,
                 )
                 try:
@@ -1012,13 +1044,28 @@ class AventView(OwnedView):
             _save_avent(adb)
             self.claimed_days = days
 
-        # Calcul des points
-        base_reward = int(AVENT_REWARDS.get(day, 10))
-        effective_reward = base_reward
-        if isinstance(interaction.user, discord.Member):
-            effective_reward = int(round(base_reward * points_multiplier_for(interaction.user)))
+        # --- Récompenses (points + tickets) ---
+        reward_info = AVENT_REWARDS.get(day, {})
 
-        new_total = await add_points(interaction.user.id, effective_reward)
+        gained_points = 0
+        gained_tickets = 0
+        new_points_total = None
+        new_tickets_total = None
+
+        # Points
+        if "points" in reward_info:
+            base_points = int(reward_info["points"])
+            gained_points = base_points
+
+            if isinstance(interaction.user, discord.Member):
+                gained_points = int(round(gained_points * points_multiplier_for(interaction.user)))
+
+            new_points_total = await add_points(interaction.user.id, gained_points)
+
+        # Tickets
+        if "tickets" in reward_info:
+            gained_tickets = int(reward_info["tickets"])
+            new_tickets_total = await add_tickets(interaction.user.id, gained_tickets)
 
         # Comptabiliser l'utilisation de la commande pour les quêtes "command_use"
         try:
@@ -1027,27 +1074,45 @@ class AventView(OwnedView):
         except Exception:
             pass
 
-        # Rafraîchir l'embed + les boutons
+        # Rafraîchir l’embed + les boutons
         self.open_day = day
         self._build_buttons()
         await interaction.response.edit_message(
-            embed=_avent_make_embed(interaction.user, self.current_year, day_now, self.claimed_days),
+            embed=_avent_make_embed(
+                interaction.user,
+                self.current_year,
+                day_now,
+                self.claimed_days
+            ),
             view=self,
         )
 
         # Message de feedback
-        bonus_txt = ""
-        if effective_reward != base_reward:
-            bonus_txt = f" (avec bonus palier, total **+{effective_reward}** pts)"
+        msg_parts = []
+        if gained_points > 0:
+            if new_points_total is not None:
+                msg_parts.append(f"**+{gained_points} pts** (total: **{new_points_total}**)")
+            else:
+                msg_parts.append(f"**+{gained_points} pts**")
+
+        if gained_tickets > 0:
+            if new_tickets_total is not None:
+                msg_parts.append(f"🎟️ **+{gained_tickets} ticket(s)** (total: **{new_tickets_total}**)")
+            else:
+                msg_parts.append(f"🎟️ **+{gained_tickets} ticket(s)**")
+
+        if not msg_parts:
+            msg_final = "Pas de récompense configurée pour ce jour 🤔"
+        else:
+            msg_final = " et ".join(msg_parts)
 
         try:
             await interaction.followup.send(
-                f"🎁 Jour {day} ouvert ! Récompense : **+{base_reward}** pts{bonus_txt} → nouveau total **{new_total}**.",
+                f"🎁 Jour {day} ouvert ! Récompense : {msg_final}.",
                 ephemeral=True,
             )
         except Exception:
             pass
-
 
 @tree.command(name="avent", description="Ouvre le calendrier de l'avent (1–24 décembre).")
 @guilds_decorator()
@@ -1083,31 +1148,31 @@ async def avent_cmd(interaction: discord.Interaction):
 # --- Streak (récompenses et tolérance) ---
 # ---------- Calendrier de l'avent ----------
 # Points "de base" par jour (avant bonus de palier)
-AVENT_REWARDS: Dict[int, int] = {
-    1: 5,
-    2: 6,
-    3: 7,
-    4: 8,
-    5: 9,
-    6: 10,
-    7: 11,
-    8: 12,
-    9: 13,
-    10: 14,
-    11: 19,
-    12: 20,
-    13: 21,
-    14: 22,
-    15: 23,
-    16: 29,
-    17: 30,
-    18: 31,
-    19: 32,
-    20: 33,
-    21: 34,
-    22: 35,
-    23: 36,
-    24: 40,
+AVENT_REWARDS: Dict[int, dict] = {
+    1:  {"points": 5},
+    2:  {"tickets": 1},
+    3:  {"points": 7},
+    4:  {"points": 8},
+    5:  {"points": 9},
+    6:  {"points": 10},
+    7:  {"tickets": 1},
+    8:  {"points": 12},
+    9:  {"points": 13},
+    10: {"points": 14},
+    11: {"points": 19},
+    12: {"points": 20},
+    13: {"points": 21},
+    14: {"points": 22},
+    15: {"tickets": 1},
+    16: {"points": 29},
+    17: {"points": 30},
+    18: {"points": 31},
+    19: {"points": 32},
+    20: {"points": 33},
+    21: {"points": 34},
+    22: {"points": 35},
+    23: {"points": 36},
+    24: {"tickets": 2},
 }
 
 def _avent_today_paris() -> tuple[int, int, int]:
@@ -3994,6 +4059,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
