@@ -1042,7 +1042,7 @@ class AventView(OwnedView):
 
         try:
             await interaction.followup.send(
-                f"🎁 Jour {day} ouvert ! Récompense de base: **+{base_reward}** pts{bonus_txt} → nouveau total **{new_total}**.",
+                f"🎁 Jour {day} ouvert ! Récompense : **+{base_reward}** pts{bonus_txt} → nouveau total **{new_total}**.",
                 ephemeral=True,
             )
         except Exception:
@@ -1083,8 +1083,32 @@ async def avent_cmd(interaction: discord.Interaction):
 # --- Streak (récompenses et tolérance) ---
 # ---------- Calendrier de l'avent ----------
 # Points "de base" par jour (avant bonus de palier)
-AVENT_REWARDS: Dict[int, int] = {d: 10 for d in range(1, 24)}
-AVENT_REWARDS[24] = 50  # jour 24 un peu plus généreux :)
+AVENT_REWARDS: Dict[int, int] = {
+    1: 5,
+    2: 6,
+    3: 7,
+    4: 8,
+    5: 9,
+    6: 10,
+    7: 11,
+    8: 12,
+    9: 13,
+    10: 14,
+    11: 19,
+    12: 20,
+    13: 21,
+    14: 22,
+    15: 23,
+    16: 29,
+    17: 30,
+    18: 31,
+    19: 32,
+    20: 33,
+    21: 34,
+    22: 35,
+    23: 36,
+    24: 40,
+}
 
 def _avent_today_paris() -> tuple[int, int, int]:
     """Retourne (année, mois, jour) en Europe/Paris."""
@@ -3970,6 +3994,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
