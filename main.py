@@ -2609,7 +2609,7 @@ class KingOfTheHillView(discord.ui.View):
             return
 
         old = self.current_number
-        new = random.randint(1, 100)
+        new = random.randint(1, 200)
 
         if new > old:
             # Réussite : on monte
@@ -4814,6 +4814,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
