@@ -1228,7 +1228,7 @@ async def roulette_cmd(
 
     bande = ["🔴", "⚫", "🔴", "⚫", "🟢", "⚫", "🔴", "⚫"]
 
-    # Premier message
+    # Premier message : animation
     await interaction.response.send_message("🎰 Préparation de la roulette...")
     msg = await interaction.original_response()
 
@@ -1244,7 +1244,7 @@ async def roulette_cmd(
         bande = bande[1:] + bande[:1]  # rotation
         await asyncio.sleep(0.25)
 
-    # Ligne finale avec le bon résultat centré
+    # Ligne finale avec la couleur gagnante
     final_row = ["🔴", "⚫", "🔴", emoji_resultat, "⚫", "🔴", "⚫"]
     vue_finale = " ".join(final_row)
 
@@ -1258,8 +1258,8 @@ async def roulette_cmd(
     await asyncio.sleep(0.6)
     await msg.edit(content=texte_final)
 
-    await asyncio.sleep(0.8)
-    await msg.edit(content=None, embed=embed)
+    # --- 📩 NOUVEAU MESSAGE : embed du résultat ---
+    await interaction.followup.send(embed=embed)
 
     # Comptabiliser pour les quêtes de type "command_use" (facultatif)
     try:
@@ -4251,6 +4251,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
