@@ -1237,26 +1237,22 @@ async def roulette_cmd(
         vue = " ".join(bande)
         texte = (
             "🎰 La roulette tourne...\n"
-            "⭐⭐⭐⬇️⭐⭐⭐\n"
+            "⬇️\n"
             f"{vue}"
         )
         await msg.edit(content=texte)
         bande = bande[1:] + bande[:1]  # rotation
         await asyncio.sleep(0.25)
 
-    # Ligne finale : toujours 7 symboles, résultat au centre
+    # Ligne finale : 3 symboles, celui du milieu = résultat
     couleurs_possibles = ["🔴", "⚫", "🟢"]
 
-    # On génère 7 symboles, et on force le centre à être la vraie couleur gagnante
-    final_row = []
-    for i in range(7):
-        if i == 3:
-            final_row.append(emoji_resultat)  # centre = résultat
-        else:
-            # Ajoute une couleur aléatoire mais évite une ligne trop répétitive
-            final_row.append(random.choice(couleurs_possibles))
+    # Emoji à gauche (on évite si possible d'avoir 3 fois le même)
+    gauche = random.choice(couleurs_possibles)
+    # Emoji à droite
+    droite = random.choice(couleurs_possibles)
 
-    vue_finale = " ".join(final_row)
+    vue_finale = f"{gauche} {emoji_resultat} {droite}"
 
     texte_final = (
         "🎰 La roulette s'arrête !\n"
@@ -1268,7 +1264,7 @@ async def roulette_cmd(
     await asyncio.sleep(0.6)
     await msg.edit(content=texte_final)
 
-    # Envoi du message final
+    # Envoi du message final dans un nouveau message
     await interaction.followup.send(embed=embed)
 
     # Comptabiliser pour les quêtes de type "command_use" (facultatif)
@@ -4261,6 +4257,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
