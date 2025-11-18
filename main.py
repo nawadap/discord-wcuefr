@@ -1226,7 +1226,6 @@ async def roulette_cmd(
 
     # --- 🔄 ANIMATION "FLÈCHE QUI POINTE" ---
 
-    # Ligne de couleurs qui défile
     bande = ["🔴", "⚫", "🔴", "⚫", "🟢", "⚫", "🔴", "⚫"]
 
     # Premier message
@@ -1234,25 +1233,24 @@ async def roulette_cmd(
     msg = await interaction.original_response()
 
     # Animation de défilement
-    for i in range(12):  # nombre de "ticks" d'animation
+    for i in range(12):
         vue = " ".join(bande)
         texte = (
             "🎰 La roulette tourne...\n"
-            "↓\n"   # petits espaces pour centrer un peu la flèche
+            "⬇️\n"
             f"{vue}"
         )
         await msg.edit(content=texte)
-        # rotation de la bande pour simuler le défilement
-        bande = bande[1:] + bande[:1]
+        bande = bande[1:] + bande[:1]  # rotation
         await asyncio.sleep(0.25)
 
-    # On construit une ligne finale avec le bon résultat au centre
+    # Ligne finale avec le bon résultat centré
     final_row = ["🔴", "⚫", "🔴", emoji_resultat, "⚫", "🔴", "⚫"]
     vue_finale = " ".join(final_row)
 
     texte_final = (
         "🎰 La roulette s'arrête !\n"
-        "⠀⠀⠀⠀⬇️\n"
+        "⬇️\n"
         f"{vue_finale}"
         f"\n\nRésultat : {emoji_resultat} **{couleur_resultat.upper()}** !"
     )
@@ -1260,7 +1258,6 @@ async def roulette_cmd(
     await asyncio.sleep(0.6)
     await msg.edit(content=texte_final)
 
-    # Encore un petit délai avant de montrer l'embed détaillé
     await asyncio.sleep(0.8)
     await msg.edit(content=None, embed=embed)
 
@@ -4254,6 +4251,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
