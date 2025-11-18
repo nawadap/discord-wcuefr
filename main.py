@@ -1313,6 +1313,8 @@ async def roulette_cmd(
 
 @tree.command(name="coinflip", description="Pile ou Face avec mise (x1.5)")
 @guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -1329,14 +1331,6 @@ async def coinflip_cmd(
 ):
     user_id_int = interaction.user.id
     uid = str(user_id_int)
-
-    # 🔒 Vérif verrouillage
-    if "coinflip" in _locked_commands and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message(
-            "⛔ Cette commande est actuellement **verrouillée** par un administrateur.",
-            ephemeral=True,
-        )
-        return
 
     # 🔒 Anti-spam
     async with _roulette_sessions_lock:
@@ -4409,6 +4403,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
