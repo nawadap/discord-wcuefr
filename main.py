@@ -1124,6 +1124,8 @@ class AventView(OwnedView):
 
 @tree.command(name="roulette", description="Joue à la roulette avec tes points.")
 @guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -4291,6 +4293,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
