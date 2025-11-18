@@ -1379,7 +1379,17 @@ async def slots_cmd(
         for _ in range(8):
             grid = random_grid()
             lines = [" | ".join(row) for row in grid]
-            texte = "🎰 La machine tourne...\n\n" + "\n".join(lines)
+            texte = (
+                "🎰 La machine tourne...\n"
+                "-------------------------\n"
+                "🍒 / 🍋 : x3\n"
+                "🍊 / 🍇 : x5\n"
+                "🔔 : x8\n"
+                "⭐ : x12\n"
+                "💎 : x20\n"
+                "-------------------------\n\n"
+                + "\n".join(lines)
+            )
             await msg.edit(content=texte)
             await asyncio.sleep(0.18)
 
@@ -1390,7 +1400,17 @@ async def slots_cmd(
         ]
 
         lines = [" | ".join(row) for row in final_grid]
-        texte_final = "🎰 La machine s'arrête !\n\n" + "\n".join(lines)
+        texte_final = (
+            "🎰 La machine s'arrête !\n"
+            "-------------------------\n"
+            "🍒 / 🍋 : x3\n"
+            "🍊 / 🍇 : x5\n"
+            "🔔 : x8\n"
+            "⭐ : x12\n"
+            "💎 : x20\n"
+            "-------------------------\n\n"
+            + "\n".join(lines)
+        )
         await asyncio.sleep(0.4)
         await msg.edit(content=texte_final)
 
@@ -4563,6 +4583,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
