@@ -1244,19 +1244,23 @@ async def roulette_cmd(
         bande = bande[1:] + bande[:1]  # rotation
         await asyncio.sleep(0.25)
 
-    # Ligne finale : 3 symboles, celui du milieu = résultat
+    # Ligne finale : toujours 7 symboles, résultat au centre
     couleurs_possibles = ["🔴", "⚫", "🟢"]
 
-    # Emoji à gauche (on évite si possible d'avoir 3 fois le même)
-    gauche = random.choice(couleurs_possibles)
-    # Emoji à droite
-    droite = random.choice(couleurs_possibles)
+    # On génère 7 symboles, et on force le centre à être la vraie couleur gagnante
+    final_row = []
+    for i in range(7):
+        if i == 3:
+            final_row.append(emoji_resultat)  # centre = résultat
+        else:
+            # Ajoute une couleur aléatoire mais évite une ligne trop répétitive
+            final_row.append(random.choice(couleurs_possibles))
 
-    vue_finale = f"{gauche} {emoji_resultat} {droite}"
+    vue_finale = " ".join(final_row)
 
     texte_final = (
         "🎰 La roulette s'arrête !\n"
-        "⬇️\n"
+        "       ⬇️\n"
         f"{vue_finale}"
         f"\n\nRésultat : {emoji_resultat} **{couleur_resultat.upper()}** !"
     )
@@ -1264,7 +1268,7 @@ async def roulette_cmd(
     await asyncio.sleep(0.6)
     await msg.edit(content=texte_final)
 
-    # Envoi du message final dans un nouveau message
+    # Envoi du message final
     await interaction.followup.send(embed=embed)
 
     # Comptabiliser pour les quêtes de type "command_use" (facultatif)
@@ -1273,8 +1277,7 @@ async def roulette_cmd(
             await _mark_command_use(interaction.guild.id, interaction.user.id, "/roulette")
     except Exception:
         pass
-
-
+        
 @tree.command(name="tickets", description="Voir ton nombre de tickets.")
 @guilds_decorator()
 async def tickets_cmd(interaction: discord.Interaction):
@@ -4257,6 +4260,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
