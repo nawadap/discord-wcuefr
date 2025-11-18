@@ -1127,9 +1127,9 @@ class AventView(OwnedView):
 )
 @app_commands.choices(
     couleur=[
-        app_commands.Choice(name="🔴 Rouge (x2)", value="rouge"),
-        app_commands.Choice(name="⚫ Noir (x2)", value="noir"),
-        app_commands.Choice(name="🟢 Vert (x35)", value="vert"),
+        app_commands.Choice(name="🔴 Rouge (x2 — ~49% de chance)", value="rouge"),
+        app_commands.Choice(name="⚫ Noir (x2 — ~49% de chance)", value="noir"),
+        app_commands.Choice(name="🟢 Vert (x35 — ~3% de chance)", value="vert"),
     ]
 )
 async def roulette_cmd(
@@ -1244,20 +1244,24 @@ async def roulette_cmd(
         bande = bande[1:] + bande[:1]  # rotation
         await asyncio.sleep(0.25)
 
+        # --- Fonction utilitaire : tirage selon probabilités réelles ---
+    def tirer_emoji_roulette():
+        t = random.randint(1, 37)
+        if t == 37:
+            return "🟢"
+        elif t <= 18:
+            return "🔴"
+        else:
+            return "⚫"
     # Ligne finale : toujours 7 symboles, résultat au centre
-    couleurs_possibles = ["🔴", "⚫", "🟢"]
-
-    # On génère 7 symboles, et on force le centre à être la vraie couleur gagnante
     final_row = []
     for i in range(7):
         if i == 3:
-            final_row.append(emoji_resultat)  # centre = résultat
+            final_row.append(emoji_resultat)  # centre = vrai résultat
         else:
-            # Ajoute une couleur aléatoire mais évite une ligne trop répétitive
-            final_row.append(random.choice(couleurs_possibles))
-
+            final_row.append(tirer_emoji_roulette())  # tirage avec vraies probabilités
+    
     vue_finale = " ".join(final_row)
-
     texte_final = (
         "🎰 La roulette s'arrête !\n"
         "                        ↓\n"
@@ -4260,6 +4264,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
