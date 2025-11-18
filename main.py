@@ -1237,7 +1237,7 @@ async def roulette_cmd(
         vue = " ".join(bande)
         texte = (
             "🎰 La roulette tourne...\n"
-            "⬇️\n"
+            "                     ⬇️\n"
             f"{vue}"
         )
         await msg.edit(content=texte)
@@ -1260,7 +1260,7 @@ async def roulette_cmd(
 
     texte_final = (
         "🎰 La roulette s'arrête !\n"
-        "       ⬇️\n"
+        "                     ⬇️\n"
         f"{vue_finale}"
         f"\n\nRésultat : {emoji_resultat} **{couleur_resultat.upper()}** !"
     )
@@ -4260,6 +4260,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
