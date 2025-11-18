@@ -1320,8 +1320,8 @@ async def roulette_cmd(
 )
 @app_commands.choices(
     choix=[
-        app_commands.Choice(name="🪙 Pile", value="pile"),
-        app_commands.Choice(name="🪙 Face", value="face"),
+        app_commands.Choice(name="😸 Pile", value="pile"),
+        app_commands.Choice(name="😹 Face", value="face"),
     ]
 )
 async def coinflip_cmd(
@@ -1360,14 +1360,17 @@ async def coinflip_cmd(
         await interaction.response.send_message("🪙 Le coin tourne...")
         msg = await interaction.original_response()
 
-        frames = ["🪙", "🔄", "🌀", "💫"]
+        frames = ["😸", "😹"]
         for f in frames * 3:
             await msg.edit(content=f"🪙 Coinflip en cours...\n{f}")
             await asyncio.sleep(0.18)
 
         # --- Résultat réel ---
         tirage = random.choice(["pile", "face"])
-        emoji = "🪙"  # même emoji pour les deux dans ce cas
+        if tirage == "pile":
+            emoji = "😸"
+        else:
+            emoji = "😹"
 
         # --- Gains (x1.5 si win) ---
         if choix.value == tirage:
@@ -4403,6 +4406,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
