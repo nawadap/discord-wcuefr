@@ -1194,10 +1194,6 @@ async def roulette_cmd(
         if solde_apres < 0:
             solde_apres = 0
 
-        # Sauvegarde du nouveau solde
-        data[uid] = solde_apres
-        _save_points(data)
-
     # --- Embed de résultat ---
     couleur_embed = {
         "rouge": discord.Color.red(),
@@ -1274,8 +1270,13 @@ async def roulette_cmd(
     await asyncio.sleep(0.6)
     await msg.edit(content=texte_final)
 
-    # Envoi du message final avec l'embed
-    await interaction.followup.send(embed=embed)
+    # Sauvegarde ICI — APRÈS l’animation
+    async with _points_lock:
+        data = _load_points()
+        data[uid] = solde_apres
+        _save_points(data)
+        # Envoi du message final avec l'embed
+        await interaction.followup.send(embed=embed)
 
     # Comptabiliser pour les quêtes de type "command_use" (facultatif)
     try:
@@ -4266,6 +4267,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
