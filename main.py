@@ -1310,7 +1310,123 @@ async def roulette_cmd(
         # On libère toujours le joueur, même en cas d'erreur
         async with _roulette_sessions_lock:
             _roulette_in_progress.discard(user_id_int)
-        
+
+@tree.command(name="coinflip", description="Pile ou Face avec mise (x1.5)")
+@guilds_decorator()
+@app_commands.describe(
+    mise="Nombre de points à miser",
+)
+@app_commands.choices(
+    choix=[
+        app_commands.Choice(name="🪙 Pile", value="pile"),
+        app_commands.Choice(name="🪙 Face", value="face"),
+    ]
+)
+async def coinflip_cmd(
+    interaction: discord.Interaction,
+    mise: app_commands.Range[int, 1, 1_000_000],
+    choix: app_commands.Choice[str],
+):
+    user_id_int = interaction.user.id
+    uid = str(user_id_int)
+
+    # 🔒 Vérif verrouillage
+    if "coinflip" in _locked_commands and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "⛔ Cette commande est actuellement **verrouillée** par un administrateur.",
+            ephemeral=True,
+        )
+        return
+
+    # 🔒 Anti-spam
+    async with _roulette_sessions_lock:
+        if user_id_int in _roulette_in_progress:
+            await interaction.response.send_message(
+                "⏳ Tu as déjà un jeu en cours, attends qu'il se termine.",
+                ephemeral=True,
+            )
+            return
+        _roulette_in_progress.add(user_id_int)
+
+    try:
+        # --- Récupère le solde ---
+        async with _points_lock:
+            data = _load_points()
+            solde_avant = int(data.get(uid, 0))
+
+        if mise > solde_avant:
+            await interaction.response.send_message(
+                f"❌ Tu n'as pas assez de points pour miser **{mise}** pts.\n"
+                f"(Solde actuel : **{solde_avant}** pts)",
+                ephemeral=True,
+            )
+            return
+
+        # --- Animation initiale ---
+        await interaction.response.send_message("🪙 Le coin tourne...")
+        msg = await interaction.original_response()
+
+        frames = ["🪙", "🔄", "🌀", "💫"]
+        for f in frames * 3:
+            await msg.edit(content=f"🪙 Coinflip en cours...\n{f}")
+            await asyncio.sleep(0.18)
+
+        # --- Résultat réel ---
+        tirage = random.choice(["pile", "face"])
+        emoji = "🪙"  # même emoji pour les deux dans ce cas
+
+        # --- Gains (x1.5 si win) ---
+        if choix.value == tirage:
+            multiplicateur = 1.5
+            total_recu = int(mise * multiplicateur)
+            net = total_recu - mise
+            solde_apres = solde_avant - mise + total_recu
+            result_txt = (
+                f"🎉 **Gagné !**\nTu as choisi **{choix.value}**, résultat : **{tirage}**."
+            )
+            gain_txt = f"Tu gagnes **+{net}** pts (tu reçois {total_recu} pts)."
+        else:
+            multiplicateur = 0
+            total_recu = 0
+            net = -mise
+            solde_apres = solde_avant - mise
+            result_txt = (
+                f"💀 **Perdu...**\nTu as choisi **{choix.value}**, résultat : **{tirage}**."
+            )
+            gain_txt = f"Tu perds ta mise de **{mise}** pts."
+
+        # --- Résultat visuel ---
+        await asyncio.sleep(0.5)
+        await msg.edit(content=f"🪙 Le coin retombe...\nRésultat : **{tirage.upper()}**")
+
+        # --- Embed final ---
+        embed = discord.Embed(
+            title="🪙 Coinflip",
+            description=result_txt,
+            color=discord.Color.gold(),
+        )
+        embed.add_field(name="Mise", value=f"{mise} pts", inline=True)
+        embed.add_field(name="Multiplicateur", value=f"x{multiplicateur}", inline=True)
+        embed.add_field(
+            name="Solde",
+            value=f"Avant : **{solde_avant}** pts\nAprès : **{solde_apres}** pts",
+            inline=False,
+        )
+        embed.add_field(name="Gain / Perte", value=gain_txt, inline=False)
+
+        # 💾 Sauvegarde APRÈS animation
+        async with _points_lock:
+            data = _load_points()
+            data[uid] = solde_apres
+            _save_points(data)
+
+        await interaction.followup.send(embed=embed)
+
+    finally:
+        # Libère le joueur
+        async with _roulette_sessions_lock:
+            _roulette_in_progress.discard(user_id_int)
+
 @tree.command(name="tickets", description="Voir ton nombre de tickets.")
 @guilds_decorator()
 async def tickets_cmd(interaction: discord.Interaction):
@@ -4293,6 +4409,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
