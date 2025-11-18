@@ -1379,7 +1379,7 @@ async def coinflip_cmd(
             net = total_recu - mise
             solde_apres = solde_avant - mise + total_recu
             result_txt = (
-                f"🎉 **Gagné !**\nTu as choisi **{choix.value} {emoji}**, résultat : **{tirage}** {emoji}."
+                f"🎉 **Gagné !**\nTu as choisi **{choix.value}**, résultat : **{tirage}** {emoji}."
             )
             gain_txt = f"Tu gagnes **+{net}** pts (tu reçois {total_recu} pts)."
         else:
@@ -1388,7 +1388,7 @@ async def coinflip_cmd(
             net = -mise
             solde_apres = solde_avant - mise
             result_txt = (
-                f"💀 **Perdu...**\nTu as choisi **{choix.value} {emoji}**, résultat : **{tirage}** {emoji}."
+                f"💀 **Perdu...**\nTu as choisi **{choix.value}**, résultat : **{tirage}** {emoji}."
             )
             gain_txt = f"Tu perds ta mise de **{mise}** pts."
 
@@ -4406,6 +4406,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
