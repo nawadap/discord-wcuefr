@@ -1311,6 +1311,56 @@ async def roulette_cmd(
         async with _roulette_sessions_lock:
             _roulette_in_progress.discard(user_id_int)
 
+@tree.command(name="king", description="👑 King of the Hill : monte le plus haut possible sans tomber !")
+@guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    mise="Nombre de points à miser",
+)
+async def king_cmd(
+    interaction: discord.Interaction,
+    mise: app_commands.Range[int, 1, 1_000_000],
+):
+    user_id_int = interaction.user.id
+    uid = str(user_id_int)
+
+    # 🔒 Anti-spam (même système que roulette / slots / coinflip)
+    async with _roulette_sessions_lock:
+        if user_id_int in _roulette_in_progress:
+            await interaction.response.send_message(
+                "⏳ Tu as déjà un jeu en cours, attends qu'il se termine.",
+                ephemeral=True,
+            )
+            return
+        _roulette_in_progress.add(user_id_int)
+
+    # --- Récupère le solde ---
+    async with _points_lock:
+        data = _load_points()
+        solde_avant = int(data.get(uid, 0))
+
+    if mise > solde_avant:
+        # Important : libérer l'anti-spam si on sort ici
+        async with _roulette_sessions_lock:
+            _roulette_in_progress.discard(user_id_int)
+
+        await interaction.response.send_message(
+            f"❌ Tu n'as pas assez de points pour miser **{mise}** pts.\n"
+            f"(Solde actuel : **{solde_avant}** pts)",
+            ephemeral=True,
+        )
+        return
+
+    # Créer la view de jeu
+    view = KingOfTheHillView(interaction, mise=mise, solde_avant=solde_avant)
+    embed = view._make_embed(status="La partie commence !")
+
+    await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
+
+    # (pas de finally ici : la libération se fait dans la View quand la partie se termine ou timeout)
+
 @tree.command(name="slots", description="Joue à la machine à sous avec tes points.")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
@@ -4583,6 +4633,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
