@@ -2513,7 +2513,7 @@ class KingOfTheHillView(discord.ui.View):
 
         self.current_number = random.randint(1, 100)
         self.steps = 0
-        self.multiplier = 1.0  # x1 au départ
+        self.multiplier = 0.4
         self.finished = False
         self.message: discord.Message | None = None
 
@@ -2615,7 +2615,7 @@ class KingOfTheHillView(discord.ui.View):
             # Réussite : on monte
             self.current_number = new
             self.steps += 1
-            self.multiplier = 1.0 + self.steps * 0.3  # x1.3, x1.6, x1.9, etc.
+            self.multiplier = 0.4 + self.steps * 0.3
 
             status = (
                 f"✅ Nouveau nombre : **{new}** (> {old})\n"
@@ -4814,6 +4814,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
