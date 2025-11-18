@@ -70,6 +70,8 @@ _quests_progress_lock = asyncio.Lock()
 _avent_lock = asyncio.Lock()
 _tickets_lock = asyncio.Lock()
 
+_roulette_in_progress: set[int] = set()
+_roulette_sessions_lock = asyncio.Lock()
 
 _voice_sessions: dict[tuple[int, int], int] = {}
 # ---------- Intents & client ----------
@@ -1137,18 +1139,32 @@ async def roulette_cmd(
     mise: app_commands.Range[int, 1, 1_000_000],
     couleur: app_commands.Choice[str],
 ):
-    # --- Récupère le solde actuel ---
-    uid = str(interaction.user.id)
-    async with _points_lock:
-        data = _load_points()
-        solde_avant = int(data.get(uid, 0))
+    user_id_int = interaction.user.id
+    uid = str(user_id_int)
+
+    # 🔒 Anti-spam : une seule roulette à la fois par joueur
+    async with _roulette_sessions_lock:
+        if user_id_int in _roulette_in_progress:
+            await interaction.response.send_message(
+                "⏳ Tu as déjà une roulette en cours, attends qu'elle se termine avant d'en relancer une.",
+                ephemeral=True,
+            )
+            return
+        _roulette_in_progress.add(user_id_int)
+
+    try:
+        # --- Récupère le solde actuel ---
+        async with _points_lock:
+            data = _load_points()
+            solde_avant = int(data.get(uid, 0))
 
         if mise > solde_avant:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 f"❌ Tu n'as pas assez de points pour miser **{mise}** pts. "
                 f"(Solde actuel : **{solde_avant}** pts)",
                 ephemeral=True,
             )
+            return
 
         # --- Tirage roulette (37 cases : 18 rouge, 18 noir, 1 vert) ---
         tirage = random.randint(1, 37)
@@ -1172,7 +1188,6 @@ async def roulette_cmd(
 
             total_recu = mise * multiplicateur      # ce que le joueur reçoit
             net = total_recu - mise                 # bénéfice net
-            # Solde final : on enlève la mise puis on ajoute le gain
             solde_apres = solde_avant - mise + total_recu
             resultat_txt = (
                 f"🎉 **Gagné !** Tu as misé sur **{choix}** et la bille est tombée "
@@ -1180,7 +1195,6 @@ async def roulette_cmd(
             )
             gain_txt = f"Tu récupères **{total_recu}** pts (bénéfice net **+{net}** pts)."
         else:
-            # Perdu : la mise est perdue (x0)
             multiplicateur = 0
             total_recu = 0
             net = -mise
@@ -1194,96 +1208,106 @@ async def roulette_cmd(
         if solde_apres < 0:
             solde_apres = 0
 
-    # --- Embed de résultat ---
-    couleur_embed = {
-        "rouge": discord.Color.red(),
-        "noir": discord.Color.dark_grey(),
-        "vert": discord.Color.green(),
-    }.get(couleur_resultat, discord.Color.blurple())
+        # --- Embed de résultat ---
+        couleur_embed = {
+            "rouge": discord.Color.red(),
+            "noir": discord.Color.dark_grey(),
+            "vert": discord.Color.green(),
+        }.get(couleur_resultat, discord.Color.blurple())
 
-    embed = discord.Embed(
-        title="🎰 Roulette",
-        description=resultat_txt,
-        color=couleur_embed,
-    )
-    embed.add_field(name="Mise", value=f"**{mise}** pts", inline=True)
-    embed.add_field(
-        name="Multiplicateur",
-        value=f"**x{multiplicateur}**" if multiplicateur > 0 else "x0",
-        inline=True,
-    )
-    embed.add_field(
-        name="Solde",
-        value=f"Avant : **{solde_avant}** pts\nAprès : **{solde_apres}** pts",
-        inline=False,
-    )
-    embed.add_field(name="Résultat", value=gain_txt, inline=False)
-    embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
-
-    # --- 🔄 ANIMATION "ROULETTE RÉALISTE" ---
-
-    # 1) On prépare une bande de 7 symboles avec proba réalistes
-    pool = ["🔴"] * 18 + ["⚫"] * 18 + ["🟢"]  # 37 cases comme une vraie roulette
-    bande = random.choices(pool, k=7)
-
-    # 2) On s'assure que le vrai résultat est dans la bande
-    if emoji_resultat not in bande:
-        import random as _random
-        bande[_random.randrange(len(bande))] = emoji_resultat
-
-    centre = len(bande) // 2  # index 3 si 7 cases
-
-    # On choisit une des positions où se trouve le vrai résultat
-    indices_resultat = [i for i, e in enumerate(bande) if e == emoji_resultat]
-    index_result = random.choice(indices_resultat)
-
-    # 3) Calcul du nombre de pas pour que l'emoji résultat arrive au centre
-    tours_complets = 3  # nombre de tours avant de s'arrêter (à ajuster)
-    steps_to_align = (index_result - centre) % len(bande)
-    total_steps = tours_complets * len(bande) + steps_to_align
-
-    # Premier message
-    await interaction.response.send_message("🎰 Préparation de la roulette...")
-    msg = await interaction.original_response()
-
-    # 4) Animation de défilement
-    for _ in range(total_steps):
-        vue = " ".join(bande)
-        texte = (
-            "🎰 La roulette tourne...\n"
-            "                        ↓\n"
-            f"{vue}"
+        embed = discord.Embed(
+            title="🎰 Roulette",
+            description=resultat_txt,
+            color=couleur_embed,
         )
-        await msg.edit(content=texte)
-        bande = bande[1:] + bande[:1]  # rotation à gauche
-        await asyncio.sleep(0.12)      # vitesse de la roulette
+        embed.add_field(name="Mise", value=f"**{mise}** pts", inline=True)
+        embed.add_field(
+            name="Multiplicateur",
+            value=f"**x{multiplicateur}**" if multiplicateur > 0 else "x0",
+            inline=True,
+        )
+        embed.add_field(
+            name="Solde",
+            value=f"Avant : **{solde_avant}** pts\nAprès : **{solde_apres}** pts",
+            inline=False,
+        )
+        embed.add_field(name="Résultat", value=gain_txt, inline=False)
+        embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
 
-    # 5) À la fin, la case au centre EST le vrai résultat
-    vue_finale = " ".join(bande)
-    texte_final = (
-        "🎰 La roulette s'arrête !\n"
-        "                        ↓\n"
-        f"{vue_finale}"
-        f"\n\nRésultat : {emoji_resultat} **{couleur_resultat.upper()}** !"
-    )
+        # --- 🔄 ANIMATION "ROULETTE RÉALISTE" ---
 
-    await asyncio.sleep(0.6)
-    await msg.edit(content=texte_final)
+        # 1) Bande de 7 symboles avec proba réalistes
+        pool = ["🔴"] * 18 + ["⚫"] * 18 + ["🟢"]  # 37 cases comme une vraie roulette
+        bande = random.choices(pool, k=7)
 
-    # Sauvegarde ICI — APRÈS l’animation
-    async with _points_lock:
-        data = _load_points()
-        data[uid] = solde_apres
-        _save_points(data)
+        # 2) On s'assure que le vrai résultat est dans la bande
+        if emoji_resultat not in bande:
+            import random as _random
+            bande[_random.randrange(len(bande))] = emoji_resultat
+
+        centre = len(bande) // 2  # index 3 si 7 cases
+
+        # On choisit une des positions où se trouve le vrai résultat
+        indices_resultat = [i for i, e in enumerate(bande) if e == emoji_resultat]
+        index_result = random.choice(indices_resultat)
+
+        # 3) Calcul du nombre de pas pour aligner l'emoji résultat au centre
+        tours_complets = 3  # nombre de tours avant de s'arrêter (à ajuster)
+        steps_to_align = (index_result - centre) % len(bande)
+        total_steps = tours_complets * len(bande) + steps_to_align
+
+        # Premier message
+        await interaction.response.send_message("🎰 Préparation de la roulette...")
+        msg = await interaction.original_response()
+
+        # 4) Animation de défilement
+        for i in range(total_steps):
+            vue = " ".join(bande)
+            texte = (
+                "🎰 La roulette tourne...\n"
+                "                        ↓\n"
+                f"{vue}"
+            )
+            await msg.edit(content=texte)
+            bande = bande[1:] + bande[:1]  # rotation à gauche
+
+            # (facultatif) ralentissement progressif
+            progress = i / total_steps
+            delay = 0.05 + (0.20 * progress)
+            await asyncio.sleep(delay)
+
+        # 5) À la fin, la case au centre EST le vrai résultat
+        vue_finale = " ".join(bande)
+        texte_final = (
+            "🎰 La roulette s'arrête !\n"
+            "                        ↓\n"
+            f"{vue_finale}"
+            f"\n\nRésultat : {emoji_resultat} **{couleur_resultat.upper()}** !"
+        )
+
+        await asyncio.sleep(0.6)
+        await msg.edit(content=texte_final)
+
+        # 💾 Sauvegarde APRÈS l’animation (pas de spoil pour /profile)
+        async with _points_lock:
+            data = _load_points()
+            data[uid] = solde_apres
+            _save_points(data)
+
         # Envoi du message final avec l'embed
         await interaction.followup.send(embed=embed)
 
-    # Comptabiliser pour les quêtes de type "command_use" (facultatif)
-    try:
-        if interaction.guild:
-            await _mark_command_use(interaction.guild.id, interaction.user.id, "/roulette")
-    except Exception:
-        pass
+        # Comptabiliser pour les quêtes de type "command_use" (facultatif)
+        try:
+            if interaction.guild:
+                await _mark_command_use(interaction.guild.id, interaction.user.id, "/roulette")
+        except Exception:
+            pass
+
+    finally:
+        # On libère toujours le joueur, même en cas d'erreur
+        async with _roulette_sessions_lock:
+            _roulette_in_progress.discard(user_id_int)
         
 @tree.command(name="tickets", description="Voir ton nombre de tickets.")
 @guilds_decorator()
@@ -4267,6 +4291,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
