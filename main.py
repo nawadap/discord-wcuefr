@@ -1242,7 +1242,7 @@ async def roulette_cmd(
         )
         await msg.edit(content=texte)
         bande = bande[1:] + bande[:1]  # rotation
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.15)
 
         # --- Fonction utilitaire : tirage selon probabilités réelles ---
     def tirer_emoji_roulette():
@@ -4264,6 +4264,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
