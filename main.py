@@ -1218,7 +1218,21 @@ async def roulette_cmd(
     embed.add_field(name="Résultat", value=gain_txt, inline=False)
     embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
 
-    await interaction.response.send_message(embed=embed)
+        # --- Animation roulette ---
+    roue = ["🔴", "⚫", "🔴", "⚫", "🟢", "⚫", "🔴", "⚫", "🟢"]
+    msg = await interaction.response.send_message("🎰 La roulette tourne...", ephemeral=False)
+    msg = await interaction.original_response()
+
+    for i in range(10):  # nombre de cycles d'animation
+        await asyncio.sleep(0.25)
+        await msg.edit(content=f"🎰 La roulette tourne... {random.choice(roue)}")
+
+    # Dernier spin avant le résultat final
+    await asyncio.sleep(0.4)
+    await msg.edit(content=f"🎰 Résultat final : {emoji_resultat} **{couleur_resultat.upper()}** !")
+
+    # Puis on envoie l'embed juste après
+    await msg.edit(content=None, embed=embed)
 
     # Comptabiliser pour les quêtes de type "command_use" (facultatif, cohérent avec le reste de ton bot)
     try:
@@ -4209,6 +4223,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
