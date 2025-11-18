@@ -1313,6 +1313,8 @@ async def roulette_cmd(
 
 @tree.command(name="slots", description="Joue à la machine à sous avec tes points.")
 @guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -1322,14 +1324,6 @@ async def slots_cmd(
 ):
     user_id_int = interaction.user.id
     uid = str(user_id_int)
-
-    # 🔒 Vérif verrouillage
-    if "slots" in _locked_commands and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message(
-            "⛔ Cette commande est actuellement **verrouillée** par un administrateur.",
-            ephemeral=True,
-        )
-        return
 
     # 🔒 Anti-spam global (même système que roulette / coinflip)
     async with _roulette_sessions_lock:
@@ -4569,6 +4563,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
