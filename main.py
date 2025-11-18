@@ -1174,7 +1174,10 @@ async def roulette_cmd(
             net = total_recu - mise                 # bénéfice net
             # Solde final : on enlève la mise puis on ajoute le gain
             solde_apres = solde_avant - mise + total_recu
-            resultat_txt = f"🎉 **Gagné !** Tu as misé sur **{choix}** et la bille est tombée sur {emoji_resultat} **{couleur_resultat}**."
+            resultat_txt = (
+                f"🎉 **Gagné !** Tu as misé sur **{choix}** et la bille est tombée "
+                f"sur {emoji_resultat} **{couleur_resultat}**."
+            )
             gain_txt = f"Tu récupères **{total_recu}** pts (bénéfice net **+{net}** pts)."
         else:
             # Perdu : la mise est perdue (x0)
@@ -1182,7 +1185,10 @@ async def roulette_cmd(
             total_recu = 0
             net = -mise
             solde_apres = solde_avant - mise
-            resultat_txt = f"💀 **Perdu...** Tu as misé sur **{choix}**, mais la bille est tombée sur {emoji_resultat} **{couleur_resultat}**."
+            resultat_txt = (
+                f"💀 **Perdu...** Tu as misé sur **{choix}**, mais la bille est tombée "
+                f"sur {emoji_resultat} **{couleur_resultat}**."
+            )
             gain_txt = f"Tu perds ta mise de **{mise}** pts."
 
         if solde_apres < 0:
@@ -1218,28 +1224,53 @@ async def roulette_cmd(
     embed.add_field(name="Résultat", value=gain_txt, inline=False)
     embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
 
-        # --- Animation roulette ---
-    roue = ["🔴", "⚫", "🔴", "⚫", "🟢", "⚫", "🔴", "⚫", "🟢"]
-    msg = await interaction.response.send_message("🎰 La roulette tourne...", ephemeral=False)
+    # --- 🔄 ANIMATION "FLÈCHE QUI POINTE" ---
+
+    # Ligne de couleurs qui défile
+    bande = ["🔴", "⚫", "🔴", "⚫", "🟢", "⚫", "🔴", "⚫"]
+
+    # Premier message
+    await interaction.response.send_message("🎰 Préparation de la roulette...")
     msg = await interaction.original_response()
 
-    for i in range(10):  # nombre de cycles d'animation
+    # Animation de défilement
+    for i in range(12):  # nombre de "ticks" d'animation
+        vue = " ".join(bande)
+        texte = (
+            "🎰 La roulette tourne...\n"
+            "⠀⠀⠀⠀⬇️\n"   # petits espaces pour centrer un peu la flèche
+            f"{vue}"
+        )
+        await msg.edit(content=texte)
+        # rotation de la bande pour simuler le défilement
+        bande = bande[1:] + bande[:1]
         await asyncio.sleep(0.25)
-        await msg.edit(content=f"🎰 La roulette tourne... {random.choice(roue)}")
 
-    # Dernier spin avant le résultat final
-    await asyncio.sleep(0.4)
-    await msg.edit(content=f"🎰 Résultat final : {emoji_resultat} **{couleur_resultat.upper()}** !")
+    # On construit une ligne finale avec le bon résultat au centre
+    final_row = ["🔴", "⚫", "🔴", emoji_resultat, "⚫", "🔴", "⚫"]
+    vue_finale = " ".join(final_row)
 
-    # Puis on envoie l'embed juste après
+    texte_final = (
+        "🎰 La roulette s'arrête !\n"
+        "⠀⠀⠀⠀⬇️\n"
+        f"{vue_finale}"
+        f"\n\nRésultat : {emoji_resultat} **{couleur_resultat.upper()}** !"
+    )
+
+    await asyncio.sleep(0.6)
+    await msg.edit(content=texte_final)
+
+    # Encore un petit délai avant de montrer l'embed détaillé
+    await asyncio.sleep(0.8)
     await msg.edit(content=None, embed=embed)
 
-    # Comptabiliser pour les quêtes de type "command_use" (facultatif, cohérent avec le reste de ton bot)
+    # Comptabiliser pour les quêtes de type "command_use" (facultatif)
     try:
         if interaction.guild:
             await _mark_command_use(interaction.guild.id, interaction.user.id, "/roulette")
     except Exception:
         pass
+
 
 @tree.command(name="tickets", description="Voir ton nombre de tickets.")
 @guilds_decorator()
@@ -4223,6 +4254,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
