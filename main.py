@@ -1224,16 +1224,34 @@ async def roulette_cmd(
     embed.add_field(name="Résultat", value=gain_txt, inline=False)
     embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
 
-    # --- 🔄 ANIMATION "FLÈCHE QUI POINTE" ---
+    # --- 🔄 ANIMATION "ROULETTE RÉALISTE" ---
 
-    bande = ["🔴", "⚫", "🔴", "⚫", "🟢", "⚫", "🔴", "⚫"]
+    # 1) On prépare une bande de 7 symboles avec proba réalistes
+    pool = ["🔴"] * 18 + ["⚫"] * 18 + ["🟢"]  # 37 cases comme une vraie roulette
+    bande = random.choices(pool, k=7)
 
-    # Premier message : animation
+    # 2) On s'assure que le vrai résultat est dans la bande
+    if emoji_resultat not in bande:
+        import random as _random
+        bande[_random.randrange(len(bande))] = emoji_resultat
+
+    centre = len(bande) // 2  # index 3 si 7 cases
+
+    # On choisit une des positions où se trouve le vrai résultat
+    indices_resultat = [i for i, e in enumerate(bande) if e == emoji_resultat]
+    index_result = random.choice(indices_resultat)
+
+    # 3) Calcul du nombre de pas pour que l'emoji résultat arrive au centre
+    tours_complets = 3  # nombre de tours avant de s'arrêter (à ajuster)
+    steps_to_align = (index_result - centre) % len(bande)
+    total_steps = tours_complets * len(bande) + steps_to_align
+
+    # Premier message
     await interaction.response.send_message("🎰 Préparation de la roulette...")
     msg = await interaction.original_response()
 
-    # Animation de défilement
-    for i in range(12):
+    # 4) Animation de défilement
+    for _ in range(total_steps):
         vue = " ".join(bande)
         texte = (
             "🎰 La roulette tourne...\n"
@@ -1241,27 +1259,11 @@ async def roulette_cmd(
             f"{vue}"
         )
         await msg.edit(content=texte)
-        bande = bande[1:] + bande[:1]  # rotation
-        await asyncio.sleep(0.15)
+        bande = bande[1:] + bande[:1]  # rotation à gauche
+        await asyncio.sleep(0.12)      # vitesse de la roulette
 
-        # --- Fonction utilitaire : tirage selon probabilités réelles ---
-    def tirer_emoji_roulette():
-        t = random.randint(1, 37)
-        if t == 37:
-            return "🟢"
-        elif t <= 18:
-            return "🔴"
-        else:
-            return "⚫"
-    # Ligne finale : toujours 7 symboles, résultat au centre
-    final_row = []
-    for i in range(7):
-        if i == 3:
-            final_row.append(emoji_resultat)  # centre = vrai résultat
-        else:
-            final_row.append(tirer_emoji_roulette())  # tirage avec vraies probabilités
-    
-    vue_finale = " ".join(final_row)
+    # 5) À la fin, la case au centre EST le vrai résultat
+    vue_finale = " ".join(bande)
     texte_final = (
         "🎰 La roulette s'arrête !\n"
         "                        ↓\n"
@@ -1272,7 +1274,7 @@ async def roulette_cmd(
     await asyncio.sleep(0.6)
     await msg.edit(content=texte_final)
 
-    # Envoi du message final
+    # Envoi du message final avec l'embed
     await interaction.followup.send(embed=embed)
 
     # Comptabiliser pour les quêtes de type "command_use" (facultatif)
@@ -4264,6 +4266,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
