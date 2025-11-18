@@ -1311,6 +1311,169 @@ async def roulette_cmd(
         async with _roulette_sessions_lock:
             _roulette_in_progress.discard(user_id_int)
 
+@tree.command(name="slots", description="Joue à la machine à sous avec tes points.")
+@guilds_decorator()
+@app_commands.describe(
+    mise="Nombre de points à miser",
+)
+async def slots_cmd(
+    interaction: discord.Interaction,
+    mise: app_commands.Range[int, 1, 1_000_000],
+):
+    user_id_int = interaction.user.id
+    uid = str(user_id_int)
+
+    # 🔒 Vérif verrouillage
+    if "slots" in _locked_commands and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "⛔ Cette commande est actuellement **verrouillée** par un administrateur.",
+            ephemeral=True,
+        )
+        return
+
+    # 🔒 Anti-spam global (même système que roulette / coinflip)
+    async with _roulette_sessions_lock:
+        if user_id_int in _roulette_in_progress:
+            await interaction.response.send_message(
+                "⏳ Tu as déjà un jeu en cours, attends qu'il se termine.",
+                ephemeral=True,
+            )
+            return
+        _roulette_in_progress.add(user_id_int)
+
+    try:
+        # --- Récupère le solde ---
+        async with _points_lock:
+            data = _load_points()
+            solde_avant = int(data.get(uid, 0))
+
+        if mise > solde_avant:
+            await interaction.response.send_message(
+                f"❌ Tu n'as pas assez de points pour miser **{mise}** pts.\n"
+                f"(Solde actuel : **{solde_avant}** pts)",
+                ephemeral=True,
+            )
+            return
+
+        # --- Définition des symboles & poids ---
+        # (emoji, poids pour le tirage, multiplicateur si ligne de 3)
+        symbols = [
+            ("🍒", 6, 3),
+            ("🍋", 6, 3),
+            ("🍊", 5, 5),
+            ("🍇", 5, 5),
+            ("🔔", 3, 8),
+            ("⭐", 2, 12),
+            ("💎", 1, 20),
+        ]
+
+        emojis = [s[0] for s in symbols]
+        weights = [s[1] for s in symbols]
+        multi_map = {s[0]: s[2] for s in symbols}
+
+        # --- Premier message ---
+        await interaction.response.send_message("🎰 Préparation de la machine à sous...")
+        msg = await interaction.original_response()
+
+        # --- Animation : grille qui spin ---
+        def random_grid():
+            return [
+                [random.choices(emojis, weights=weights, k=1)[0] for _ in range(3)]
+                for _ in range(3)
+            ]
+
+        for _ in range(8):
+            grid = random_grid()
+            lines = [" | ".join(row) for row in grid]
+            texte = "🎰 La machine tourne...\n\n" + "\n".join(lines)
+            await msg.edit(content=texte)
+            await asyncio.sleep(0.18)
+
+        # --- Tirage final (grille utilisée pour les gains) ---
+        final_grid = [
+            [random.choices(emojis, weights=weights, k=1)[0] for _ in range(3)]
+            for _ in range(3)
+        ]
+
+        lines = [" | ".join(row) for row in final_grid]
+        texte_final = "🎰 La machine s'arrête !\n\n" + "\n".join(lines)
+        await asyncio.sleep(0.4)
+        await msg.edit(content=texte_final)
+
+        # --- Calcul des gains (3 lignes horizontales) ---
+        total_multi = 0
+        lignes_gagnantes = []
+        for idx, row in enumerate(final_grid):
+            a, b, c = row
+            if a == b == c:
+                m = multi_map.get(a, 0)
+                if m > 0:
+                    total_multi += m
+                    lignes_gagnantes.append((idx + 1, a, m))
+
+        if total_multi > 0:
+            total_recu = mise * total_multi
+            net = total_recu - mise
+            solde_apres = solde_avant - mise + total_recu
+            resultat_txt = "🎉 **Jackpot !** Tu as obtenu au moins une ligne gagnante."
+            details_lignes = "\n".join(
+                f"Ligne {num} : {sym} {sym} {sym} → x{multi}"
+                for (num, sym, multi) in lignes_gagnantes
+            )
+            gain_txt = (
+                f"{details_lignes}\n\n"
+                f"Tu reçois **{total_recu}** pts (bénéfice net **+{net}** pts)."
+            )
+        else:
+            total_recu = 0
+            net = -mise
+            solde_apres = solde_avant - mise
+            resultat_txt = "💀 **Perdu...** Aucune ligne gagnante."
+            gain_txt = f"Tu perds ta mise de **{mise}** pts."
+
+        if solde_apres < 0:
+            solde_apres = 0
+
+        # --- Embed de résultat ---
+        embed = discord.Embed(
+            title="🎰 Machine à sous",
+            description=resultat_txt,
+            color=discord.Color.purple(),
+        )
+        embed.add_field(name="Mise", value=f"{mise} pts", inline=True)
+        embed.add_field(
+            name="Multiplicateur total",
+            value=f"x{total_multi}" if total_multi > 0 else "x0",
+            inline=True,
+        )
+        embed.add_field(
+            name="Solde",
+            value=f"Avant : **{solde_avant}** pts\nAprès : **{solde_apres}** pts",
+            inline=False,
+        )
+        embed.add_field(name="Détail", value=gain_txt, inline=False)
+        embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
+
+        # 💾 Sauvegarde APRÈS animation (pas de spoil pour /profile)
+        async with _points_lock:
+            data = _load_points()
+            data[uid] = solde_apres
+            _save_points(data)
+
+        await interaction.followup.send(embed=embed)
+
+        # Comptabiliser pour les quêtes de type "command_use" (facultatif)
+        try:
+            if interaction.guild:
+                await _mark_command_use(interaction.guild.id, interaction.user.id, "/slots")
+        except Exception:
+            pass
+
+    finally:
+        # libérer le joueur même en cas d'erreur
+        async with _roulette_sessions_lock:
+            _roulette_in_progress.discard(user_id_int)
+
 @tree.command(name="coinflip", description="Pile ou Face avec mise (x1.5)")
 @guilds_decorator()
 @app_commands.default_permissions(administrator=True)
@@ -4406,6 +4569,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
