@@ -1238,7 +1238,7 @@ async def roulette_cmd(
         vue = " ".join(bande)
         texte = (
             "🎰 La roulette tourne...\n"
-            "⠀⠀⠀⠀⬇️\n"   # petits espaces pour centrer un peu la flèche
+            "⠀⠀⠀⠀↓\n"   # petits espaces pour centrer un peu la flèche
             f"{vue}"
         )
         await msg.edit(content=texte)
@@ -4254,6 +4254,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
