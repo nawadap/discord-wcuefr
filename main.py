@@ -1120,6 +1120,113 @@ class AventView(OwnedView):
         except Exception:
             pass
 
+@tree.command(name="roulette", description="Joue à la roulette avec tes points.")
+@guilds_decorator()
+@app_commands.describe(
+    mise="Nombre de points à miser",
+)
+@app_commands.choices(
+    couleur=[
+        app_commands.Choice(name="🔴 Rouge (x2)", value="rouge"),
+        app_commands.Choice(name="⚫ Noir (x2)", value="noir"),
+        app_commands.Choice(name="🟢 Vert (x35)", value="vert"),
+    ]
+)
+async def roulette_cmd(
+    interaction: discord.Interaction,
+    mise: app_commands.Range[int, 1, 1_000_000],
+    couleur: app_commands.Choice[str],
+):
+    # --- Récupère le solde actuel ---
+    uid = str(interaction.user.id)
+    async with _points_lock:
+        data = _load_points()
+        solde_avant = int(data.get(uid, 0))
+
+        if mise > solde_avant:
+            return await interaction.response.send_message(
+                f"❌ Tu n'as pas assez de points pour miser **{mise}** pts. "
+                f"(Solde actuel : **{solde_avant}** pts)",
+                ephemeral=True,
+            )
+
+        # --- Tirage roulette (37 cases : 18 rouge, 18 noir, 1 vert) ---
+        tirage = random.randint(1, 37)
+        if tirage == 37:
+            couleur_resultat = "vert"
+            emoji_resultat = "🟢"
+        elif tirage <= 18:
+            couleur_resultat = "rouge"
+            emoji_resultat = "🔴"
+        else:
+            couleur_resultat = "noir"
+            emoji_resultat = "⚫"
+
+        # --- Calcul du gain ---
+        choix = couleur.value  # "rouge" | "noir" | "vert"
+        if choix == couleur_resultat:
+            if couleur_resultat in ("rouge", "noir"):
+                multiplicateur = 2
+            else:  # vert
+                multiplicateur = 35
+
+            total_recu = mise * multiplicateur      # ce que le joueur reçoit
+            net = total_recu - mise                 # bénéfice net
+            # Solde final : on enlève la mise puis on ajoute le gain
+            solde_apres = solde_avant - mise + total_recu
+            resultat_txt = f"🎉 **Gagné !** Tu as misé sur **{choix}** et la bille est tombée sur {emoji_resultat} **{couleur_resultat}**."
+            gain_txt = f"Tu récupères **{total_recu}** pts (bénéfice net **+{net}** pts)."
+        else:
+            # Perdu : la mise est perdue (x0)
+            multiplicateur = 0
+            total_recu = 0
+            net = -mise
+            solde_apres = solde_avant - mise
+            resultat_txt = f"💀 **Perdu...** Tu as misé sur **{choix}**, mais la bille est tombée sur {emoji_resultat} **{couleur_resultat}**."
+            gain_txt = f"Tu perds ta mise de **{mise}** pts."
+
+        if solde_apres < 0:
+            solde_apres = 0
+
+        # Sauvegarde du nouveau solde
+        data[uid] = solde_apres
+        _save_points(data)
+
+    # --- Embed de résultat ---
+    couleur_embed = {
+        "rouge": discord.Color.red(),
+        "noir": discord.Color.dark_grey(),
+        "vert": discord.Color.green(),
+    }.get(couleur_resultat, discord.Color.blurple())
+
+    embed = discord.Embed(
+        title="🎰 Roulette",
+        description=resultat_txt,
+        color=couleur_embed,
+    )
+    embed.add_field(name="Mise", value=f"**{mise}** pts", inline=True)
+    embed.add_field(
+        name="Multiplicateur",
+        value=f"**x{multiplicateur}**" if multiplicateur > 0 else "x0",
+        inline=True,
+    )
+    embed.add_field(
+        name="Solde",
+        value=f"Avant : **{solde_avant}** pts\nAprès : **{solde_apres}** pts",
+        inline=False,
+    )
+    embed.add_field(name="Résultat", value=gain_txt, inline=False)
+    embed.set_footer(text=f"Demandé par {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed)
+
+    # Comptabiliser pour les quêtes de type "command_use" (facultatif, cohérent avec le reste de ton bot)
+    try:
+        if interaction.guild:
+            await _mark_command_use(interaction.guild.id, interaction.user.id, "/roulette")
+    except Exception:
+        pass
+
 @tree.command(name="tickets", description="Voir ton nombre de tickets.")
 @guilds_decorator()
 async def tickets_cmd(interaction: discord.Interaction):
@@ -4102,6 +4209,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
