@@ -2502,6 +2502,187 @@ async def purchases_cmd(
 
     await interaction.response.send_message("\n".join(lines))
 
+class KingOfTheHillView(discord.ui.View):
+    def __init__(self, interaction: discord.Interaction, mise: int, solde_avant: int):
+        super().__init__(timeout=60)  # 60s d'inactivité avant timeout
+        self.interaction = interaction
+        self.user_id = interaction.user.id
+        self.uid = str(self.user_id)
+        self.mise = mise
+        self.solde_avant = solde_avant
+
+        self.current_number = random.randint(1, 100)
+        self.steps = 0
+        self.multiplier = 1.0  # x1 au départ
+        self.finished = False
+        self.message: discord.Message | None = None
+
+    def _make_embed(self, status: str | None = None) -> discord.Embed:
+        desc = ""
+        if status:
+            desc += status + "\n\n"
+
+        potentiel = int(self.mise * self.multiplier)
+
+        desc += (
+            f"Nombre actuel : **{self.current_number}**\n"
+            f"Étapes réussies : **{self.steps}**\n"
+            f"Multiplicateur actuel : **x{self.multiplier:.2f}**\n"
+            f"Si tu encaisses maintenant : **{potentiel}** pts\n\n"
+            "🧗 **Continuer** : risque de tout perdre mais le multiplicateur monte si le prochain nombre est plus grand.\n"
+            "💰 **Encaisser** : sécurise ton gain avec le multiplicateur actuel."
+        )
+
+        embed = discord.Embed(
+            title="👑 King of the Hill",
+            description=desc,
+            color=discord.Color.orange(),
+        )
+        embed.set_footer(text=f"Demandé par {self.interaction.user.display_name}")
+        return embed
+
+    async def _end_and_save(
+        self,
+        interaction: discord.Interaction | None,
+        description: str,
+        color: discord.Color,
+        gain: int,
+        solde_apres: int,
+    ):
+        """Termine la partie : sauvegarde les points, désactive les boutons, libère l'anti-spam."""
+        self.finished = True
+
+        # Sauvegarde des points
+        async with _points_lock:
+            data = _load_points()
+            data[self.uid] = max(0, solde_apres)
+            _save_points(data)
+
+        # Désactiver les boutons
+        for child in self.children:
+            child.disabled = True
+
+        embed = discord.Embed(
+            title="👑 King of the Hill",
+            description=description,
+            color=color,
+        )
+        embed.add_field(name="Mise", value=f"{self.mise} pts", inline=True)
+        embed.add_field(name="Gain", value=f"{gain} pts", inline=True)
+        embed.add_field(
+            name="Solde",
+            value=f"Avant : **{self.solde_avant}** pts\nAprès : **{solde_apres}** pts",
+            inline=False,
+        )
+        embed.set_footer(text=f"Demandé par {self.interaction.user.display_name}")
+
+        if interaction is not None:
+            await interaction.response.edit_message(embed=embed, view=self)
+        elif self.message is not None:
+            await self.message.edit(embed=embed, view=self)
+
+        # Libérer l'anti-spam
+        async with _roulette_sessions_lock:
+            _roulette_in_progress.discard(self.user_id)
+
+        self.stop()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Empêche les autres joueurs de cliquer."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "❌ Ce jeu ne t'appartient pas.", ephemeral=True
+            )
+            return False
+        if self.finished:
+            await interaction.response.send_message(
+                "⛔ Cette partie est déjà terminée.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Continuer 🧗", style=discord.ButtonStyle.primary)
+    async def continuer_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if not await self.interaction_check(interaction):
+            return
+
+        old = self.current_number
+        new = random.randint(1, 100)
+
+        if new > old:
+            # Réussite : on monte
+            self.current_number = new
+            self.steps += 1
+            self.multiplier = 1.0 + self.steps * 0.3  # x1.3, x1.6, x1.9, etc.
+
+            status = (
+                f"✅ Nouveau nombre : **{new}** (> {old})\n"
+                f"Tu montes d'un cran sur la colline !"
+            )
+            embed = self._make_embed(status=status)
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            # Chute : perdu
+            solde_apres = self.solde_avant - self.mise
+            gain = 0
+            desc = (
+                f"💥 **Tu es tombé de la colline !**\n"
+                f"Le nouveau nombre est **{new}** (≤ {old}).\n\n"
+                f"Tu perds ta mise de **{self.mise}** pts."
+            )
+            await self._end_and_save(
+                interaction=interaction,
+                description=desc,
+                color=discord.Color.red(),
+                gain=gain,
+                solde_apres=solde_apres,
+            )
+
+    @discord.ui.button(label="Encaisser 💰", style=discord.ButtonStyle.success)
+    async def encaisser_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if not await self.interaction_check(interaction):
+            return
+
+        gain = int(self.mise * self.multiplier)
+        solde_apres = self.solde_avant - self.mise + gain
+
+        desc = (
+            f"💰 **Tu encaisses !**\n"
+            f"Nombre final : **{self.current_number}**\n"
+            f"Multiplicateur final : **x{self.multiplier:.2f}**\n"
+            f"Tu remportes **{gain}** pts."
+        )
+        await self._end_and_save(
+            interaction=interaction,
+            description=desc,
+            color=discord.Color.green(),
+            gain=gain,
+            solde_apres=solde_apres,
+        )
+
+    async def on_timeout(self):
+        """Si le joueur ne clique plus, on désactive juste les boutons et on libère l'anti-spam."""
+        if self.finished:
+            return
+
+        for child in self.children:
+            child.disabled = True
+
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+        async with _roulette_sessions_lock:
+            _roulette_in_progress.discard(self.user_id)
+
+        self.stop()
+
 PER_PAGE = 15  # éléments par page
 class InviteListView(discord.ui.View):
     def __init__(self, author_id: int, cible: discord.Member, total: int, rows: List[str]):
@@ -4633,6 +4814,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
