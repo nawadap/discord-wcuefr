@@ -1168,7 +1168,6 @@ async def roulette_cmd(
 
         # --- Tirage roulette (37 cases : 18 rouge, 18 noir, 1 vert) ---
         tirage = random.randint(1, 37)
-        tirage = 37
         if tirage == 37:
             couleur_resultat = "vert"
             emoji_resultat = "🟢"
@@ -4807,6 +4806,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
