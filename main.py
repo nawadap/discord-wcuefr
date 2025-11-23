@@ -72,6 +72,7 @@ _tickets_lock = asyncio.Lock()
 
 _roulette_in_progress: set[int] = set()
 _roulette_sessions_lock = asyncio.Lock()
+_roulette_forced: dict[int, str] = {}
 
 _voice_sessions: dict[tuple[int, int], int] = {}
 # ---------- Intents & client ----------
@@ -1166,20 +1167,49 @@ async def roulette_cmd(
             )
             return
 
-        # --- Tirage roulette (37 cases : 18 rouge, 18 noir, 1 vert) ---
-        tirage = random.randint(1, 37)
-        if tirage == 37:
-            couleur_resultat = "vert"
-            emoji_resultat = "🟢"
-        elif tirage <= 18:
-            couleur_resultat = "rouge"
-            emoji_resultat = "🔴"
+        # Choix du joueur ("rouge" | "noir" | "vert")
+        choix = couleur.value
+
+        # 🧪 Forçage éventuel par un admin pour ce joueur
+        force_mode = _roulette_forced.pop(user_id_int, None)
+
+        if force_mode is None:
+            # --- Tirage roulette normal (37 cases : 18 rouge, 18 noir, 1 vert) ---
+            tirage = random.randint(1, 37)
+            if tirage == 37:
+                couleur_resultat = "vert"
+                emoji_resultat = "🟢"
+            elif tirage <= 18:
+                couleur_resultat = "rouge"
+                emoji_resultat = "🔴"
+            else:
+                couleur_resultat = "noir"
+                emoji_resultat = "⚫"
         else:
-            couleur_resultat = "noir"
-            emoji_resultat = "⚫"
+            # --- Tirage forcé par un admin ---
+            if force_mode == "win":
+                # On fait en sorte que la bille tombe sur le choix du joueur
+                couleur_resultat = choix
+            elif force_mode == "lose":
+                # On choisit une couleur différente de son choix
+                if choix == "rouge":
+                    couleur_resultat = random.choice(["noir", "vert"])
+                elif choix == "noir":
+                    couleur_resultat = random.choice(["rouge", "vert"])
+                else:  # choix == "vert"
+                    couleur_resultat = random.choice(["rouge", "noir"])
+            else:
+                # Couleur explicitement forcée: "rouge", "noir" ou "vert"
+                couleur_resultat = force_mode
+
+            emoji_resultat = {
+                "rouge": "🔴",
+                "noir": "⚫",
+                "vert": "🟢",
+            }.get(couleur_resultat, "❓")
 
         # --- Calcul du gain ---
-        choix = couleur.value  # "rouge" | "noir" | "vert"
+        # choix = couleur.value  # (déjà défini plus haut)
         if choix == couleur_resultat:
             if couleur_resultat in ("rouge", "noir"):
                 multiplicateur = 2
@@ -1308,6 +1338,72 @@ async def roulette_cmd(
         # On libère toujours le joueur, même en cas d'erreur
         async with _roulette_sessions_lock:
             _roulette_in_progress.discard(user_id_int)
+            
+@tree.command(
+    name="roulette_admin",
+    description="(admin) Forcer le prochain résultat de /roulette pour un joueur."
+)
+@guilds_decorator()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    membre="Le joueur concerné",
+    resultat="Ce que doit donner la prochaine roulette pour ce joueur"
+)
+@app_commands.choices(
+    resultat=[
+        app_commands.Choice(name="✅ Gagner (peu importe son choix)", value="win"),
+        app_commands.Choice(name="❌ Perdre (peu importe son choix)", value="lose"),
+        app_commands.Choice(name="🔴 Sortir Rouge", value="rouge"),
+        app_commands.Choice(name="⚫ Sortir Noir", value="noir"),
+        app_commands.Choice(name="🟢 Sortir Vert", value="vert"),
+        app_commands.Choice(name="♻️ Annuler le forçage", value="clear"),
+    ]
+)
+async def roulette_admin_cmd(
+    interaction: discord.Interaction,
+    membre: discord.Member,
+    resultat: app_commands.Choice[str],
+):
+    mode = resultat.value
+
+    if mode == "clear":
+        _roulette_forced.pop(membre.id, None)
+        await interaction.response.send_message(
+            f"♻️ Le prochain /roulette de {membre.mention} ne sera plus forcé.",
+            ephemeral=True,
+        )
+        await _send_admin_log(
+            interaction.guild,
+            interaction.user,
+            "roulette.admin.clear",
+            cible=f"{membre} ({membre.id})",
+        )
+        return
+
+    # On enregistre le mode pour ce joueur ("win","lose","rouge","noir","vert")
+    _roulette_forced[membre.id] = mode
+
+    label = {
+        "win": "gagner",
+        "lose": "perdre",
+        "rouge": "sortir **ROUGE**",
+        "noir": "sortir **NOIR**",
+        "vert": "sortir **VERT**",
+    }.get(mode, mode)
+
+    await interaction.response.send_message(
+        f"✅ Le prochain /roulette de {membre.mention} est configuré pour **{label}**.",
+        ephemeral=True,
+    )
+
+    await _send_admin_log(
+        interaction.guild,
+        interaction.user,
+        "roulette.admin.set",
+        cible=f"{membre} ({membre.id})",
+        mode=mode,
+    )
 
 @tree.command(name="king", description="👑 King of the Hill : monte le plus haut possible sans tomber !")
 @guilds_decorator()
@@ -4806,6 +4902,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
