@@ -1124,8 +1124,6 @@ class AventView(OwnedView):
 
 @tree.command(name="roulette", description="Joue à la roulette avec tes points.")
 @guilds_decorator()
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -1313,8 +1311,6 @@ async def roulette_cmd(
 
 @tree.command(name="king", description="👑 King of the Hill : monte le plus haut possible sans tomber !")
 @guilds_decorator()
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -1363,8 +1359,6 @@ async def king_cmd(
 
 @tree.command(name="slots", description="Joue à la machine à sous avec tes points.")
 @guilds_decorator()
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -1540,8 +1534,6 @@ async def slots_cmd(
 
 @tree.command(name="coinflip", description="Pile ou Face avec mise (x1.5)")
 @guilds_decorator()
-@app_commands.default_permissions(administrator=True)
-@app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(
     mise="Nombre de points à miser",
 )
@@ -4814,6 +4806,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     bot.run(TOKEN)
+
 
 
 
